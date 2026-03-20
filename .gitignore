@@ -2,6 +2,14 @@
 .nanvix-configured
 nanvix-artifacts/
 
+# Nanvix build state (keep .nanvix/z.py tracked)
+.nanvix/venv/
+.nanvix/env.json
+.nanvix/cache/
+.nanvix/sysroot/
+.nanvix/buildroot/
+.nanvix/__pycache__/
+
 # SQLite build artifacts
 .main.mk.checks
 .target_source
