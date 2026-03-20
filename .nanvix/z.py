@@ -18,7 +18,7 @@ class SqliteBuild(ZScript):
     """Build script for nanvix/sqlite."""
 
     # SQLite links against zlib — require it in the sysroot.
-    SYSROOT_REQUIRED_FILES = ("lib/libposix.a", "lib/libz.a")
+    SYSROOT_REQUIRED_FILES = ZScript.SYSROOT_REQUIRED_FILES + ("lib/libz.a",)
 
     def _make(self, *targets: str, extra_vars: dict[str, str] | None = None) -> None:
         """Run ``make -f Makefile.nanvix`` with standard Nanvix variables."""
