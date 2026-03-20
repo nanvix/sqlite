@@ -54,3 +54,6 @@ src-verify
 
 # Temp directories
 tsrc/
+
+# Release artifacts
+dist/

@@ -17,11 +17,14 @@ from nanvix_zutil import CFG_GH_TOKEN, CFG_SYSROOT, EXIT_MISSING_DEP, Sysroot, Z
 class SqliteBuild(ZScript):
     """Build script for nanvix/sqlite."""
 
-    # SQLite links against zlib — require it in the sysroot.
-    SYSROOT_REQUIRED_FILES = ZScript.SYSROOT_REQUIRED_FILES + ("lib/libz.a",)
+    def sysroot_required_files(self) -> list[str]:
+        """Require zlib in addition to the base sysroot files."""
+        files = super().sysroot_required_files()
+        files.append("lib/libz.a")
+        return files
 
-    def _make(self, *targets: str, extra_vars: dict[str, str] | None = None) -> None:
-        """Run ``make -f Makefile.nanvix`` with standard Nanvix variables."""
+    def _make_args(self, *targets: str) -> list[str]:
+        """Build the ``make -f Makefile.nanvix`` argument list."""
         nanvix_sysroot = self.config.get(CFG_SYSROOT, "")
         if not nanvix_sysroot:
             log.fatal(
@@ -30,18 +33,18 @@ class SqliteBuild(ZScript):
                 hint="Run `./z setup` first to download the sysroot.",
             )
 
-        cmd: list[str] = [
+        return [
             "make",
             "-f",
             "Makefile.nanvix",
-            f"CONFIG_NANVIX=y",
+            "CONFIG_NANVIX=y",
             f"NANVIX_HOME={nanvix_sysroot}",
+            *targets,
         ]
-        if extra_vars:
-            for key, val in extra_vars.items():
-                cmd.append(f"{key}={val}")
-        cmd.extend(targets)
-        self.run(*cmd, cwd=self.repo_root)
+
+    def _make(self, *targets: str) -> None:
+        """Run ``make -f Makefile.nanvix`` with standard Nanvix variables."""
+        self.run(*self._make_args(*targets), cwd=self.repo_root)
 
     def setup(self) -> None:
         """Download the Nanvix sysroot and persist its path."""
@@ -52,7 +55,7 @@ class SqliteBuild(ZScript):
             tag="latest",
             gh_token=self.config.get(CFG_GH_TOKEN),
         )
-        sysroot.verify(list(self.SYSROOT_REQUIRED_FILES))
+        sysroot.verify(self.sysroot_required_files())
         self.config.set(CFG_SYSROOT, str(sysroot.path))
         self.config.save()
 
@@ -61,23 +64,19 @@ class SqliteBuild(ZScript):
         self._make("all")
 
     def test(self) -> None:
-        """Run smoke, integration, and functional tests."""
-        platform_vars = {
-            "PLATFORM": self.config.machine,
-            "PROCESS_MODE": self.config.deployment_mode,
-            "MEMORY_SIZE": self.config.memory_size,
-        }
-        self._make("test", extra_vars=platform_vars)
+        """Run the SQLite test suite.
+
+        Without targets, runs the full suite (smoke + integration + functional).
+        With targets (e.g. ``./z test -- test-smoke test-integration``), passes
+        them directly to the Makefile.
+        """
+        targets = self.targets if self.targets else ["test"]
+        self.run(*self._make_args(*targets), cwd=self.repo_root)
 
     def release(self) -> None:
-        """Package the release tarball and verify it."""
-        platform_vars = {
-            "PLATFORM": self.config.machine,
-            "PROCESS_MODE": self.config.deployment_mode,
-            "MEMORY_SIZE": self.config.memory_size,
-        }
-        self._make("package", extra_vars=platform_vars)
-        self._make("verify-package", extra_vars=platform_vars)
+        """Package the SQLite release tarball and verify it."""
+        self.run(*self._make_args("package"), cwd=self.repo_root)
+        self.run(*self._make_args("verify-package"), cwd=self.repo_root)
 
     def clean(self) -> None:
         """Remove build artifacts."""
