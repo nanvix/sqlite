@@ -31,5 +31,6 @@ jobs:
 
           echo "$TAGS" | while read -r tag; do
             echo "Deleting release: ${tag}"
-            gh release delete "${tag}" --repo "${{ github.repository }}" --yes --cleanup-tag || true
+            gh release delete "${tag}" --repo "${{ github.repository }}" --yes --cleanup-tag \
+              || echo "::warning::Failed to delete release ${tag}"
           done

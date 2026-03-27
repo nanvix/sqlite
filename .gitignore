@@ -1,6 +1,13 @@
 # Nanvix build artifacts
 .nanvix-configured
 nanvix-artifacts/
+.nanvix/venv/
+.nanvix/__pycache__/
+.nanvix/cache/
+.nanvix/sysroot/
+.nanvix/buildroot/
+.nanvix/env.json
+.nanvix/**/*.pyc
 
 # SQLite build artifacts
 .main.mk.checks
