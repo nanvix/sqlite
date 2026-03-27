@@ -1,0 +1,35 @@
+name: Prune Old Releases
+
+on:
+  schedule:
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prune:
+    if: github.repository == 'nanvix/sqlite'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prune releases older than 90 days
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          CUTOFF=$(date -u -d '90 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          echo "Pruning releases published before ${CUTOFF}..."
+
+          TAGS=$(gh api "repos/${{ github.repository }}/releases" --paginate --jq \
+            ".[] | select(.published_at < \"${CUTOFF}\") | .tag_name")
+
+          if [[ -z "$TAGS" ]]; then
+            echo "No releases to prune."
+            exit 0
+          fi
+
+          echo "$TAGS" | while read -r tag; do
+            echo "Deleting release: ${tag}"
+            gh release delete "${tag}" --repo "${{ github.repository }}" --yes --cleanup-tag || true
+          done
