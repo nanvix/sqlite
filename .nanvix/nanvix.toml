@@ -1,0 +1,9 @@
+manifest-version = "0.1.0"
+
+[package]
+name = "sqlite"
+version = "3.49.0"
+nanvix-version = "latest"
+
+[dependencies]
+zlib = "1.3.1"
