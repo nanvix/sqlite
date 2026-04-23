@@ -29,7 +29,6 @@ jobs:
     with:
       zutil-version: "v0.7.25"
       memory-sizes: '["128mb","256mb"]'
-      matrix-exclude: '[{"platform":"hyperlight","process-mode":"single-process"},{"platform":"hyperlight","process-mode":"multi-process"}]'
       caller-event-name: ${{ github.event_name }}
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
@@ -46,7 +45,6 @@ jobs:
     with:
       zutil-version: "v0.7.25"
       memory-sizes: '["128mb","256mb"]'
-      matrix-exclude: '[{"platform":"hyperlight","process-mode":"single-process"},{"platform":"hyperlight","process-mode":"multi-process"}]'
       caller-event-name: 'schedule'
     secrets:
       GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
