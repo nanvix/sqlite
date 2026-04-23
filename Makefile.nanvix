@@ -209,7 +209,7 @@ ifdef CONFIG_NANVIX_DOCKER
 	  ./bin/mkramfs.elf -o /tmp/rootfs.img /tmp/nanvix-ramfs/ && \
 	  timeout --foreground 120 ./bin/nanvixd.elf \
 	    -bin-dir ./bin -ramfs /tmp/rootfs.img \
-	    -- ./sqlite3$(EXE) < $(DOCKER_WORKSPACE_PATH)/_sqlite_test.sql'
+	    -- $(abspath sqlite3$(EXE)) < $(DOCKER_WORKSPACE_PATH)/_sqlite_test.sql'
 	@echo "  PASS: sqlite3 standalone (exit code 0)"
 else
 	@echo "  Running sqlite3$(EXE) via nanvixd.elf standalone..."
@@ -219,7 +219,7 @@ else
 	"$(SYSROOT_PATH)/bin/mkramfs.elf" -o /tmp/rootfs.img /tmp/nanvix-ramfs/
 	cd "$(SYSROOT_PATH)" && timeout --foreground 120 ./bin/nanvixd.elf \
 	  -bin-dir ./bin -ramfs /tmp/rootfs.img \
-	  -- ./sqlite3$(EXE) < $(abspath _sqlite_test.sql)
+	  -- $(abspath sqlite3$(EXE)) < $(abspath _sqlite_test.sql)
 	@rm -rf /tmp/nanvix-ramfs /tmp/rootfs.img
 	@echo "  PASS: sqlite3 standalone (exit code 0)"
 endif
