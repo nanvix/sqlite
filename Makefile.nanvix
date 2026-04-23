@@ -166,7 +166,7 @@ endif
 # ===========================================================================
 
 # --- Smoke tests: verify build artifacts (no runtime needed) ---
-test-smoke: build
+test-smoke:
 	@echo "=== SQLite smoke tests ==="
 	@echo "  Checking libsqlite3.a..."
 	@LIBSQLITE=$$(find . -name "libsqlite3.a" -not -path "*/nanvix-artifacts/*" -not -path "*/dist/*" | head -1); \
@@ -182,7 +182,7 @@ test-smoke: build
 	@echo "  PASS: SQLite smoke tests"
 
 # --- Integration tests: verify CLI binary links correctly ---
-test-integration: build
+test-integration:
 	@echo "=== SQLite integration tests ==="
 	@echo "  OK: sqlite3$(EXE) ($$(wc -c < sqlite3$(EXE)) bytes)"
 	@echo "  Checking sqlite3 is statically linked..."
@@ -190,7 +190,7 @@ test-integration: build
 	@echo "  PASS: SQLite integration tests"
 
 # --- Functional tests: run SQL queries on nanvixd.elf ---
-test-functional: build
+test-functional:
 	@echo "=== SQLite functional tests ==="
 	@echo ".bail on" > _sqlite_test.sql
 	@echo "SELECT 'SQLITE_TEST_HELLO: Hello from SQLite';" >> _sqlite_test.sql
