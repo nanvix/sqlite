@@ -208,7 +208,7 @@ class SqliteBuild(ZScript):
                     with sql_file.open("rb") as sql_stdin:
                         result = subprocess.run(
                             [str(nanvixd.resolve()), "-bin-dir", str((sysroot_path / "bin").resolve()),
-                             "-ramfs", str(ramfs_img), "--", f"./{binary.name}"],
+                             "-ramfs", str(ramfs_img), "--", str(binary.resolve())],
                             stdin=sql_stdin, timeout=120,
                         )
                     if result.returncode != 0:
