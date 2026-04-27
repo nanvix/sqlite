@@ -192,13 +192,7 @@ test-integration:
 # --- Functional tests: run SQL queries on nanvixd.elf ---
 test-functional:
 	@echo "=== SQLite functional tests ==="
-	@echo ".bail on" > _sqlite_test.sql
-	@echo "SELECT 'SQLITE_TEST_HELLO: Hello from SQLite';" >> _sqlite_test.sql
-	@echo "CREATE TABLE nanvix_test(id INTEGER PRIMARY KEY, name TEXT);" >> _sqlite_test.sql
-	@echo "INSERT INTO nanvix_test VALUES(1, 'nanvix');" >> _sqlite_test.sql
-	@echo "INSERT INTO nanvix_test VALUES(2, 'python');" >> _sqlite_test.sql
-	@echo "SELECT 'SQLITE_TEST_COUNT:', count(*) FROM nanvix_test;" >> _sqlite_test.sql
-	@echo "SELECT 'SQLITE_TEST_ROW:', id, name FROM nanvix_test WHERE id=1;" >> _sqlite_test.sql
+	@cp .nanvix/functional_test.sql _sqlite_test.sql
 ifeq ($(PROCESS_MODE),standalone)
 ifdef CONFIG_NANVIX_DOCKER
 	@echo "  Running sqlite3$(EXE) via nanvixd.elf standalone (Docker)..."

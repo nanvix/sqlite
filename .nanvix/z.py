@@ -175,18 +175,11 @@ class SqliteBuild(ZScript):
                 (ramfs_dir / "tmp").mkdir(exist_ok=True)
                 shutil.copy2(binary, ramfs_dir / binary.name)
 
-                # Create the SQL test script (mirrors Makefile test-functional).
+                # Copy the shared SQL test script (single source of truth
+                # used by both Makefile.nanvix and this Windows test path).
+                shared_sql = self.repo_root / ".nanvix" / "functional_test.sql"
                 sql_file = ramfs_dir / "_sqlite_test.sql"
-                sql_file.write_text(
-                    ".bail on\n"
-                    "SELECT 'SQLITE_TEST_HELLO: Hello from SQLite';\n"
-                    "CREATE TABLE nanvix_test(id INTEGER PRIMARY KEY, name TEXT);\n"
-                    "INSERT INTO nanvix_test VALUES(1, 'nanvix');\n"
-                    "INSERT INTO nanvix_test VALUES(2, 'python');\n"
-                    "SELECT 'SQLITE_TEST_COUNT:', count(*) FROM nanvix_test;\n"
-                    "SELECT 'SQLITE_TEST_ROW:', id, name FROM nanvix_test WHERE id=1;\n",
-                    encoding="utf-8",
-                )
+                shutil.copy2(shared_sql, sql_file)
 
                 # Write ramfs image alongside the ramfs source dir to avoid
                 # self-inclusion while keeping artifacts scoped to this temp dir.
