@@ -85,12 +85,16 @@ You need the following components to build SQLite for Nanvix:
 
 ### Available Platform Configurations
 
-| Platform | Process Mode | Artifact Pattern |
-|----------|--------------|------------------|
-| hyperlight | multi-process | `hyperlight.*multi-process` |
-| hyperlight | single-process | `hyperlight.*single-process` |
-| microvm | single-process | `microvm.*single-process` |
-| microvm | multi-process | `microvm.*multi-process` |
+| Platform | Process Mode | Linux | Windows | Artifact Pattern |
+|----------|--------------|-------|---------|------------------|
+| hyperlight | standalone | ✅ | ✅ | `hyperlight.*standalone` |
+| hyperlight | single-process | ✅ | ❌ | `hyperlight.*single-process` |
+| hyperlight | multi-process | ✅ | ❌ | `hyperlight.*multi-process` |
+| microvm | standalone | ✅ | ✅ | `microvm.*standalone` |
+| microvm | single-process | ✅ | ❌ | `microvm.*single-process` |
+| microvm | multi-process | ✅ | ❌ | `microvm.*multi-process` |
+
+> **Note:** Single-process and multi-process modes require `linuxd` and are only supported on Linux. Windows testing is limited to standalone mode, where `nanvixd.exe` runs the guest binary directly.
 
 ### Downloading Nanvix
 
@@ -256,16 +260,18 @@ The GitHub Actions workflow at `.github/workflows/nanvix-ci.yml` automates build
 
 ### Build Matrix
 
-The CI runs on 4 different platform/process-mode configurations:
+The CI runs on all platform × process-mode × memory combinations:
 
-| Platform | Process Mode | Runner |
-|----------|--------------|--------|
-| hyperlight | multi-process | `self-hosted-hyperlight-multi` |
-| hyperlight | single-process | `self-hosted-hyperlight-single` |
-| microvm | single-process | `self-hosted-microvm-single` |
-| microvm | multi-process | `self-hosted-microvm-multi` |
+| Platform | Process Mode | Memory | OS |
+|----------|--------------|--------|----|
+| hyperlight | standalone | 128mb, 256mb | Linux + Windows |
+| hyperlight | single-process | 128mb, 256mb | Linux |
+| hyperlight | multi-process | 128mb, 256mb | Linux |
+| microvm | standalone | 128mb, 256mb | Linux + Windows |
+| microvm | single-process | 128mb, 256mb | Linux |
+| microvm | multi-process | 128mb, 256mb | Linux |
 
-All configurations run in parallel with `fail-fast: false`, ensuring that all platforms are tested even if one fails.
+All Linux configurations run full tests (smoke, integration, and functional) in parallel with `fail-fast: false`, ensuring that all platforms are tested even if one fails. Windows standalone tests use `nanvixd.exe` to run `sqlite3.elf` with functional SQL queries.
 
 ### Dependency Management
 
