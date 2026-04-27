@@ -168,7 +168,8 @@ class SqliteBuild(ZScript):
         for binary in test_binaries:
             name = binary.stem
             print(f"RUN  {name}...")
-            with tempfile.TemporaryDirectory(prefix=f"nanvix_{name}_") as tmpdir:
+            with tempfile.TemporaryDirectory(prefix=f"nanvix_{name}_",
+                                             ignore_cleanup_errors=True) as tmpdir:
                 tmpdir_path = Path(tmpdir)
                 ramfs_dir = tmpdir_path / "ramfs"
                 ramfs_dir.mkdir()
@@ -198,12 +199,12 @@ class SqliteBuild(ZScript):
                     failed.append(name)
                     continue
                 try:
-                    with sql_file.open("rb") as sql_stdin:
-                        result = subprocess.run(
-                            [str(nanvixd.resolve()), "-bin-dir", str((sysroot_path / "bin").resolve()),
-                             "-ramfs", str(ramfs_img), "--", str(binary.resolve())],
-                            stdin=sql_stdin, timeout=120,
-                        )
+                    sql_input = sql_file.read_bytes()
+                    result = subprocess.run(
+                        [str(nanvixd.resolve()), "-bin-dir", str((sysroot_path / "bin").resolve()),
+                         "-ramfs", str(ramfs_img), "--", str(binary.resolve())],
+                        input=sql_input, timeout=120,
+                    )
                     if result.returncode != 0:
                         print(f"FAIL {name} (exit code {result.returncode})")
                         failed.append(name)
