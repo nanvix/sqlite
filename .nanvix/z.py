@@ -45,7 +45,9 @@ class SqliteBuild(ZScript):
     """Build script for nanvix/sqlite."""
 
     def _make_args(
-        self, *targets: str, with_install_prefix: bool = True,
+        self,
+        *targets: str,
+        with_install_prefix: bool = True,
     ) -> list[str]:
         """Build the common make argument list."""
         sysroot = self.config.get(CFG_SYSROOT, "")
@@ -60,17 +62,21 @@ class SqliteBuild(ZScript):
         toolchain_p = self.translate_path(Path(toolchain))
 
         args = [
-            "make", "-f", "Makefile.nanvix",
+            "make",
+            "-f",
+            "Makefile.nanvix",
             f"{_MAKE_VAR_CONFIG}=y",
             f"{_MAKE_VAR_HOME}={sysroot_p}",
             f"{_MAKE_VAR_TOOLCHAIN}={toolchain_p}",
         ]
 
-        args.extend([
-            f"{_MAKE_VAR_PLATFORM}={self.config.machine}",
-            f"{_MAKE_VAR_PROCESS_MODE}={self.config.deployment_mode}",
-            f"{_MAKE_VAR_MEMORY_SIZE}={self.config.memory_size}",
-        ])
+        args.extend(
+            [
+                f"{_MAKE_VAR_PLATFORM}={self.config.machine}",
+                f"{_MAKE_VAR_PROCESS_MODE}={self.config.deployment_mode}",
+                f"{_MAKE_VAR_MEMORY_SIZE}={self.config.memory_size}",
+            ]
+        )
 
         if with_install_prefix:
             args.append(
@@ -106,8 +112,7 @@ class SqliteBuild(ZScript):
                 if item.is_dir():
                     shutil.copytree(item, target, dirs_exist_ok=True)
                     log.info(
-                        f"Merged directory {subdir}/{item.name}"
-                        " into sysroot",
+                        f"Merged directory {subdir}/{item.name}" " into sysroot",
                     )
                 elif not target.exists():
                     shutil.copy2(item, target)
@@ -166,9 +171,7 @@ class SqliteBuild(ZScript):
         for candidate in [self.repo_root, self.repo_root / "build"]:
             if candidate.is_dir():
                 elfs = sorted(candidate.glob("*.elf"))
-                found = [
-                    b for b in elfs if b.name in test_allowlist
-                ]
+                found = [b for b in elfs if b.name in test_allowlist]
                 for b in found:
                     if b.name not in {x.name for x in test_binaries}:
                         test_binaries.append(b)
@@ -176,8 +179,7 @@ class SqliteBuild(ZScript):
         if not test_binaries:
             expected = ", ".join(sorted(test_allowlist))
             log.fatal(
-                f"No allowlisted test binaries found."
-                f" Expected: {expected}.",
+                f"No allowlisted test binaries found." f" Expected: {expected}.",
                 code=EXIT_MISSING_DEP,
                 hint=(
                     "Build the test binaries first"
@@ -198,7 +200,8 @@ class SqliteBuild(ZScript):
         name = binary.stem
         log.info(f"RUN  {name}...")
         with tempfile.TemporaryDirectory(
-            prefix=f"nanvix_{name}_", ignore_cleanup_errors=True,
+            prefix=f"nanvix_{name}_",
+            ignore_cleanup_errors=True,
         ) as tmpdir:
             tmpdir_path = Path(tmpdir)
             ramfs_dir = tmpdir_path / "ramfs"
@@ -206,9 +209,7 @@ class SqliteBuild(ZScript):
             (ramfs_dir / "tmp").mkdir(exist_ok=True)
             shutil.copy2(binary, ramfs_dir / binary.name)
 
-            shared_sql = (
-                self.repo_root / ".nanvix" / "functional_test.sql"
-            )
+            shared_sql = self.repo_root / ".nanvix" / "functional_test.sql"
             sql_file = ramfs_dir / "_sqlite_test.sql"
             shutil.copy2(shared_sql, sql_file)
 
@@ -216,18 +217,28 @@ class SqliteBuild(ZScript):
             if not self._build_ramfs(mkramfs, ramfs_img, ramfs_dir, name):
                 return False
             return self._execute_test(
-                nanvixd, sysroot_path, ramfs_img, binary, sql_file, name,
+                nanvixd,
+                sysroot_path,
+                ramfs_img,
+                binary,
+                sql_file,
+                name,
             )
 
     def _build_ramfs(
-        self, mkramfs: Path, ramfs_img: Path, ramfs_dir: Path, name: str,
+        self,
+        mkramfs: Path,
+        ramfs_img: Path,
+        ramfs_dir: Path,
+        name: str,
     ) -> bool:
         """Build the ramfs image. Return True on success."""
         try:
             subprocess.run(  # noqa: S603
                 [
                     str(mkramfs.resolve()),
-                    "-o", str(ramfs_img),
+                    "-o",
+                    str(ramfs_img),
                     str(ramfs_dir),
                 ],
                 check=True,
@@ -259,9 +270,12 @@ class SqliteBuild(ZScript):
             result = subprocess.run(  # noqa: S603
                 [
                     str(nanvixd.resolve()),
-                    "-bin-dir", bin_dir,
-                    "-ramfs", str(ramfs_img),
-                    "--", str(binary.resolve()),
+                    "-bin-dir",
+                    bin_dir,
+                    "-ramfs",
+                    str(ramfs_img),
+                    "--",
+                    str(binary.resolve()),
                 ],
                 input=sql_input,
                 timeout=120,
@@ -298,7 +312,10 @@ class SqliteBuild(ZScript):
             binary.stem
             for binary in test_binaries
             if not self._run_single_test(
-                binary, nanvixd, mkramfs, sysroot_path,
+                binary,
+                nanvixd,
+                mkramfs,
+                sysroot_path,
             )
         ]
 
@@ -313,13 +330,17 @@ class SqliteBuild(ZScript):
         """Package the SQLite release tarball and verify it."""
         self.run(*self._make_args("package"), cwd=self.repo_root)
         self.run(
-            *self._make_args("verify-package"), cwd=self.repo_root,
+            *self._make_args("verify-package"),
+            cwd=self.repo_root,
         )
 
     def clean(self) -> None:
         """Remove build artifacts."""
         self.run(
-            "make", "-f", "Makefile.nanvix", "clean",
+            "make",
+            "-f",
+            "Makefile.nanvix",
+            "clean",
             cwd=self.repo_root,
         )
 
