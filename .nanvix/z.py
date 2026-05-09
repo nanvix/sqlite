@@ -158,7 +158,9 @@ class SqliteBuild(ZScript):
             log.info("Pre-building jimsh0 on the host...")
             subprocess.run(  # noqa: S603
                 [
-                    "cc", "-o", str(jimsh0),
+                    "cc",
+                    "-o",
+                    str(jimsh0),
                     *self._JIMSH0_CFLAGS,
                     str(root / "autosetup" / "jimsh0.c"),
                 ],
@@ -172,16 +174,22 @@ class SqliteBuild(ZScript):
 
         # Phase 3: build remaining host tools on the host.
         host_tools = [
-            "lemon", "mksourceid", "mkkeywordhash",
-            "srcck1", "src-verify",
+            "lemon",
+            "mksourceid",
+            "mkkeywordhash",
+            "srcck1",
+            "src-verify",
         ]
         missing = [t for t in host_tools if not (root / t).is_file()]
         if missing:
             log.info(f"Pre-building host tools on the host: {missing}")
             subprocess.run(  # noqa: S603
                 [
-                    "make", *missing,
-                    "B.cc=cc", "B.tclsh=./jimsh0", f"TOP={root}",
+                    "make",
+                    *missing,
+                    "B.cc=cc",
+                    "B.tclsh=./jimsh0",
+                    f"TOP={root}",
                 ],
                 check=True,
                 cwd=root,
@@ -391,6 +399,8 @@ class SqliteBuild(ZScript):
 
     def release(self) -> None:
         """Package the SQLite release tarball and verify it."""
+        if self.docker is not None:
+            self._prebuild_host_tools()
         self.run(*self._make_args("package"), cwd=self.repo_root)
         self.run(
             *self._make_args("verify-package"),
