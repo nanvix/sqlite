@@ -20,7 +20,7 @@
 # Toolchain Detection
 # ===========================================================================
 
-NANVIX_DOCKER_IMAGE ?= nanvix/toolchain:latest-minimal
+NANVIX_DOCKER_IMAGE ?= ghcr.io/nanvix/toolchain-gcc:sha-34a3641
 
 ifdef CONFIG_NANVIX
   NANVIX_TOOLCHAIN ?= /opt/nanvix
@@ -137,6 +137,10 @@ CONFIGURE_OPTS = \
 
 CONFIGURED_MARKER = .nanvix-configured
 
+# When a pre-built jimsh0 exists (built on the host for the minimal
+# Docker image), propagate B.tclsh=./jimsh0 to all sub-make invocations.
+BTCLSH_OVERRIDE = $(if $(wildcard jimsh0),B.tclsh=./jimsh0)
+
 # ===========================================================================
 # Build Targets
 # ===========================================================================
@@ -147,17 +151,30 @@ configure: $(CONFIGURED_MARKER)
 
 $(CONFIGURED_MARKER):
 ifdef CONFIG_NANVIX_DOCKER
-	$(DOCKER_RUN) sh -c '$(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS)'
+	@# Pre-build autosetup bootstrap interpreter on the host so that
+	@# the (minimal) cross-compilation image does not need a host compiler.
+	@if [ ! -x jimsh0 ]; then \
+	  cc -o jimsh0 -DHAVE_REALPATH -DHAVE_DIRENT_H -DHAVE_SYS_TIME_H \
+	    autosetup/jimsh0.c 2>/dev/null || true; \
+	fi
+	$(DOCKER_RUN) sh -c '$(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS) --with-tclsh=./jimsh0'
 else
-	$(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS)
+	@if [ -x jimsh0 ]; then \
+	  $(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS) --with-tclsh=./jimsh0; \
+	else \
+	  $(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS); \
+	fi
 endif
 	touch $(CONFIGURED_MARKER)
 
 build: $(CONFIGURED_MARKER)
 ifdef CONFIG_NANVIX_DOCKER
-	$(DOCKER_RUN) make -j$$(nproc) all
+	@# Build host tools (lemon, mkkeywordhash, mksourceid) on the host
+	@# because the minimal cross-compilation image has no host compiler.
+	make lemon mksourceid mkkeywordhash srcck1 src-verify B.cc="cc" B.tclsh="./jimsh0" TOP="$(CURDIR)"
+	$(DOCKER_RUN) make -j$$(nproc) B.tclsh=./jimsh0 all
 else
-	make -j$$(nproc) all
+	make -j$$(nproc) $(BTCLSH_OVERRIDE) all
 endif
 	@if [ -f sqlite3 ] && [ ! -f sqlite3$(EXE) ]; then mv sqlite3 sqlite3$(EXE); fi
 
@@ -253,12 +270,12 @@ ifdef CONFIG_NANVIX_DOCKER
 	  -v $(STAGING):$(STAGING) \
 	  -w $(DOCKER_WORKSPACE_PATH) \
 	  -e HOME=/tmp \
-	  $(NANVIX_DOCKER_IMAGE) make install DESTDIR="$(STAGING)"
+	  $(NANVIX_DOCKER_IMAGE) make install B.tclsh=./jimsh0 DESTDIR="$(STAGING)"
   else
-	$(DOCKER_RUN) make install DESTDIR="$(DOCKER_WORKSPACE_PATH)/dist/$(ARTIFACT_NAME)"
+	$(DOCKER_RUN) make install B.tclsh=./jimsh0 DESTDIR="$(DOCKER_WORKSPACE_PATH)/dist/$(ARTIFACT_NAME)"
   endif
 else
-	make install DESTDIR="$(STAGING)"
+	make install $(BTCLSH_OVERRIDE) DESTDIR="$(STAGING)"
 endif
 	@# Ensure sysroot/ layout: move INSTALL_PREFIX contents to sysroot/
 	@if [ -d "$(STAGING)/sysroot" ]; then \
@@ -272,10 +289,10 @@ endif
 	@if [ -f "$(STAGING)/sysroot/bin/sqlite3" ] && [ ! -e "$(STAGING)/sysroot/bin/sqlite3.elf" ]; then \
 	  cp "$(STAGING)/sysroot/bin/sqlite3" "$(STAGING)/sysroot/bin/sqlite3.elf"; \
 	fi
-	tar -cjf dist/$(ARTIFACT_NAME).tar.bz2 -C $(STAGING) sysroot
-	@echo "  Package: dist/$(ARTIFACT_NAME).tar.bz2"
+	tar -czf dist/$(ARTIFACT_NAME).tar.gz -C $(STAGING) sysroot
+	@echo "  Package: dist/$(ARTIFACT_NAME).tar.gz"
 	@echo "  Contents:"
-	@tar tjf dist/$(ARTIFACT_NAME).tar.bz2 | head -20
+	@tar tzf dist/$(ARTIFACT_NAME).tar.gz | head -20
 
 # ===========================================================================
 # Verify Package
@@ -284,13 +301,13 @@ endif
 verify-package:
 	@echo "=== Verifying SQLite package ==="
 	$(eval ARTIFACT_NAME := sqlite-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
-	@TARBALL="dist/$(ARTIFACT_NAME).tar.bz2"; \
+	@TARBALL="dist/$(ARTIFACT_NAME).tar.gz"; \
 	if [ ! -f "$$TARBALL" ]; then \
 	  echo "FAIL: Package tarball not found: $$TARBALL"; exit 1; \
 	fi; \
 	echo "Package contents:"; \
-	tar tjf "$$TARBALL"; \
-	if ! tar tjf "$$TARBALL" | grep -q 'sysroot/lib/'; then \
+	tar tzf "$$TARBALL"; \
+	if ! tar tzf "$$TARBALL" | grep -q 'sysroot/lib/'; then \
 	  echo "FAIL: Package missing sysroot/lib/ entries"; exit 1; \
 	fi; \
 	echo "  PASS: SQLite package verification"
@@ -308,17 +325,17 @@ ifdef CONFIG_NANVIX_DOCKER
 	  -v $(abspath $(DESTDIR)):$(abspath $(DESTDIR)) \
 	  -w $(DOCKER_WORKSPACE_PATH) \
 	  -e HOME=/tmp \
-	  $(NANVIX_DOCKER_IMAGE) make install DESTDIR="$(abspath $(DESTDIR))"
+	  $(NANVIX_DOCKER_IMAGE) make install B.tclsh=./jimsh0 DESTDIR="$(abspath $(DESTDIR))"
   else
-	$(DOCKER_RUN) make install
+	$(DOCKER_RUN) make install B.tclsh=./jimsh0
   endif
 else
-	make install DESTDIR="$(DESTDIR)"
+	make install $(BTCLSH_OVERRIDE) DESTDIR="$(DESTDIR)"
 endif
 
 clean:
 	-make clean 2>/dev/null || true
-	rm -f $(CONFIGURED_MARKER) sqlite3$(EXE) _sqlite_test.sql
+	rm -f $(CONFIGURED_MARKER) sqlite3$(EXE) _sqlite_test.sql jimsh0 lemon mksourceid mkkeywordhash srcck1 src-verify lempar.c
 	rm -rf dist/
 
 distclean: clean
