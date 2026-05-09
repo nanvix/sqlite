@@ -121,8 +121,71 @@ class SqliteBuild(ZScript):
                     )
 
     def build(self) -> None:
-        """Cross-compile libsqlite3.a and sqlite3.elf for Nanvix."""
+        """Cross-compile libsqlite3.a and sqlite3.elf for Nanvix.
+
+        When building inside Docker, the minimal toolchain image has no
+        host C compiler.  Host-side build tools (jimsh0, lemon, etc.)
+        are therefore pre-built on the runner and made available to the
+        container through the mounted workspace.
+        """
+        if self.docker is not None:
+            self._prebuild_host_tools()
         self.run(*self._make_args("all"), cwd=self.repo_root)
+
+    # ------------------------------------------------------------------
+    # Host-tool pre-build helpers (Docker-only)
+    # ------------------------------------------------------------------
+
+    _JIMSH0_CFLAGS = [
+        "-DHAVE_REALPATH",
+        "-DHAVE_DIRENT_H",
+        "-DHAVE_SYS_TIME_H",
+    ]
+
+    def _prebuild_host_tools(self) -> None:
+        """Build host-side tools needed by autosetup and the Makefile.
+
+        Phase 1 -- jimsh0 (TCL bootstrap for ``./configure``).
+        Phase 2 -- ``make configure`` inside Docker (generates Makefile).
+        Phase 3 -- lemon, mkkeywordhash, mksourceid, srcck1, src-verify
+                   compiled on the host using the generated Makefile.
+        """
+        root = self.repo_root
+
+        # Phase 1: build jimsh0 on the host.
+        jimsh0 = root / "jimsh0"
+        if not jimsh0.is_file():
+            log.info("Pre-building jimsh0 on the host...")
+            subprocess.run(  # noqa: S603
+                [
+                    "cc", "-o", str(jimsh0),
+                    *self._JIMSH0_CFLAGS,
+                    str(root / "autosetup" / "jimsh0.c"),
+                ],
+                check=True,
+                cwd=root,
+            )
+
+        # Phase 2: run configure inside Docker.
+        log.info("Running configure inside Docker...")
+        self.run(*self._make_args("configure"), cwd=root)
+
+        # Phase 3: build remaining host tools on the host.
+        host_tools = [
+            "lemon", "mksourceid", "mkkeywordhash",
+            "srcck1", "src-verify",
+        ]
+        missing = [t for t in host_tools if not (root / t).is_file()]
+        if missing:
+            log.info(f"Pre-building host tools on the host: {missing}")
+            subprocess.run(  # noqa: S603
+                [
+                    "make", *missing,
+                    "B.cc=cc", "B.tclsh=./jimsh0", f"TOP={root}",
+                ],
+                check=True,
+                cwd=root,
+            )
 
     def test(self) -> None:
         """Run the test suite.

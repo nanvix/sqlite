@@ -155,7 +155,11 @@ ifdef CONFIG_NANVIX_DOCKER
 	fi
 	$(DOCKER_RUN) sh -c '$(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS) --with-tclsh=./jimsh0'
 else
-	$(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS)
+	@if [ -x jimsh0 ]; then \
+	  $(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS) --with-tclsh=./jimsh0; \
+	else \
+	  $(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS); \
+	fi
 endif
 	touch $(CONFIGURED_MARKER)
 
@@ -166,7 +170,11 @@ ifdef CONFIG_NANVIX_DOCKER
 	make lemon mksourceid mkkeywordhash srcck1 src-verify B.cc="cc" B.tclsh="./jimsh0" TOP="$(CURDIR)"
 	$(DOCKER_RUN) make -j$$(nproc) B.tclsh=./jimsh0 all
 else
-	make -j$$(nproc) all
+	@if [ -x jimsh0 ]; then \
+	  make -j$$(nproc) B.tclsh=./jimsh0 all; \
+	else \
+	  make -j$$(nproc) all; \
+	fi
 endif
 	@if [ -f sqlite3 ] && [ ! -f sqlite3$(EXE) ]; then mv sqlite3 sqlite3$(EXE); fi
 
