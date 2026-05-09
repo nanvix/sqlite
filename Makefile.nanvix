@@ -20,7 +20,7 @@
 # Toolchain Detection
 # ===========================================================================
 
-NANVIX_DOCKER_IMAGE ?= nanvix/toolchain:latest-minimal
+NANVIX_DOCKER_IMAGE ?= ghcr.io/nanvix/toolchain-gcc:sha-34a3641
 
 ifdef CONFIG_NANVIX
   NANVIX_TOOLCHAIN ?= /opt/nanvix
@@ -147,7 +147,13 @@ configure: $(CONFIGURED_MARKER)
 
 $(CONFIGURED_MARKER):
 ifdef CONFIG_NANVIX_DOCKER
-	$(DOCKER_RUN) sh -c '$(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS)'
+	@# Pre-build autosetup bootstrap interpreter on the host so that
+	@# the (minimal) cross-compilation image does not need a host compiler.
+	@if [ ! -x jimsh0 ]; then \
+	  cc -o jimsh0 -DHAVE_REALPATH -DHAVE_DIRENT_H -DHAVE_SYS_TIME_H \
+	    autosetup/jimsh0.c 2>/dev/null || true; \
+	fi
+	$(DOCKER_RUN) sh -c '$(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS) --with-tclsh=./jimsh0'
 else
 	$(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS)
 endif
@@ -155,7 +161,10 @@ endif
 
 build: $(CONFIGURED_MARKER)
 ifdef CONFIG_NANVIX_DOCKER
-	$(DOCKER_RUN) make -j$$(nproc) all
+	@# Build host tools (lemon, mkkeywordhash, mksourceid) on the host
+	@# because the minimal cross-compilation image has no host compiler.
+	make lemon mksourceid mkkeywordhash srcck1 src-verify B.cc="cc" B.tclsh="./jimsh0" TOP="$(CURDIR)"
+	$(DOCKER_RUN) make -j$$(nproc) B.tclsh=./jimsh0 all
 else
 	make -j$$(nproc) all
 endif
@@ -318,7 +327,7 @@ endif
 
 clean:
 	-make clean 2>/dev/null || true
-	rm -f $(CONFIGURED_MARKER) sqlite3$(EXE) _sqlite_test.sql
+	rm -f $(CONFIGURED_MARKER) sqlite3$(EXE) _sqlite_test.sql jimsh0 lemon mksourceid mkkeywordhash srcck1 src-verify lempar.c
 	rm -rf dist/
 
 distclean: clean
