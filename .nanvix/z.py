@@ -128,7 +128,10 @@ class SqliteBuild(ZScript):
         are therefore pre-built on the runner and made available to the
         container through the mounted workspace.
         """
-        if self.docker is not None:
+        if (
+            self.docker  # pyright: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
+            is not None
+        ):
             self._prebuild_host_tools()
         self.run(*self._make_args("all"), cwd=self.repo_root)
 
@@ -399,7 +402,10 @@ class SqliteBuild(ZScript):
 
     def release(self) -> None:
         """Package the SQLite release tarball and verify it."""
-        if self.docker is not None:
+        if (
+            self.docker  # pyright: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
+            is not None
+        ):
             self._prebuild_host_tools()
         self.run(*self._make_args("package"), cwd=self.repo_root)
         self.run(
