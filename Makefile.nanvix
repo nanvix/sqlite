@@ -211,29 +211,10 @@ test-functional:
 	@echo "=== SQLite functional tests ==="
 	@cp .nanvix/functional_test.sql _sqlite_test.sql
 ifeq ($(PROCESS_MODE),standalone)
-ifdef CONFIG_NANVIX_DOCKER
-	@echo "  Running sqlite3$(EXE) via nanvixd.elf standalone (Docker)..."
-	$(DOCKER_RUN_FUNCTIONAL) sh -c '\
-	  mkdir -p /tmp/nanvix-ramfs && \
-	  cp $(DOCKER_WORKSPACE_PATH)/sqlite3$(EXE) /tmp/nanvix-ramfs/ && \
-	  cp $(DOCKER_WORKSPACE_PATH)/_sqlite_test.sql /tmp/nanvix-ramfs/ && \
-	  ./bin/mkramfs.elf -o /tmp/rootfs.img /tmp/nanvix-ramfs/ && \
-	  timeout --foreground 120 ./bin/nanvixd.elf \
-	    -bin-dir ./bin -ramfs /tmp/rootfs.img \
-	    -- $(DOCKER_WORKSPACE_PATH)/sqlite3$(EXE) < $(DOCKER_WORKSPACE_PATH)/_sqlite_test.sql'
-	@echo "  PASS: sqlite3 standalone (exit code 0)"
-else
-	@echo "  Running sqlite3$(EXE) via nanvixd.elf standalone..."
-	@rm -rf /tmp/nanvix-ramfs && mkdir -p /tmp/nanvix-ramfs
-	@cp $(abspath sqlite3$(EXE)) /tmp/nanvix-ramfs/
-	@cp $(abspath _sqlite_test.sql) /tmp/nanvix-ramfs/
-	"$(SYSROOT_PATH)/bin/mkramfs.elf" -o /tmp/rootfs.img /tmp/nanvix-ramfs/
-	cd "$(SYSROOT_PATH)" && timeout --foreground 120 ./bin/nanvixd.elf \
-	  -bin-dir ./bin -ramfs /tmp/rootfs.img \
-	  -- $(abspath sqlite3$(EXE)) < $(abspath _sqlite_test.sql)
-	@rm -rf /tmp/nanvix-ramfs /tmp/rootfs.img
-	@echo "  PASS: sqlite3 standalone (exit code 0)"
-endif
+	@echo "  NOTE: Standalone functional tests are handled via ./z.sh."
+	@echo "  Delegating to: ./z.sh test test-functional"
+	@PLATFORM="$(PLATFORM)" PROCESS_MODE="$(PROCESS_MODE)" MEMORY_SIZE="$(MEMORY_SIZE)" \
+		./z.sh --with-nanvix "$(NANVIX_HOME)" test test-functional
 else
 ifdef CONFIG_NANVIX_DOCKER
 	@echo "  Running sqlite3$(EXE) via nanvixd.elf (Docker)..."
