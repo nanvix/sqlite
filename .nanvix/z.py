@@ -23,6 +23,8 @@ from nanvix_zutil import (
     TOOLCHAIN_CONTAINER_PATH,
     ZScript,
     log,
+    make_initrd,
+    run,
 )
 
 IS_WINDOWS = sys.platform == "win32"
@@ -47,9 +49,13 @@ class SqliteBuild(ZScript):
         self,
         *targets: str,
         with_install_prefix: bool = True,
-        docker: bool | None = None,
     ) -> list[str]:
-        """Build the common make argument list."""
+        """Build the common make argument list.
+
+        Path translation for ``NANVIX_HOME`` is applied when running
+        under Docker (i.e. ``self.docker`` is set); otherwise the raw
+        host path is used.
+        """
         sysroot = self.config.get(CFG_SYSROOT, "")
         if not sysroot:
             log.fatal(
@@ -57,12 +63,10 @@ class SqliteBuild(ZScript):
                 code=EXIT_MISSING_DEP,
                 hint="Run `./z setup` first to download the sysroot.",
             )
-        toolchain = str(TOOLCHAIN_CONTAINER_PATH)
-        if docker is False:
-            sysroot_p = Path(sysroot)
-        else:
-            sysroot_p = self.translate_path(Path(sysroot))
-        toolchain_p = toolchain
+        toolchain_p = TOOLCHAIN_CONTAINER_PATH
+        sysroot_p = (
+            self.docker.translate_path(Path(sysroot)) if self.docker else Path(sysroot)
+        )
 
         args = [
             "make",
@@ -134,7 +138,7 @@ class SqliteBuild(ZScript):
         if IS_WINDOWS:
             log.fatal("Unable to build on Windows.")
         self._prebuild_host_tools()
-        self.run(*self._make_args("all"), cwd=self.repo_root, docker=True)
+        run(*self._make_args("all"), cwd=self.repo_root, docker=self.docker)
 
     # ------------------------------------------------------------------
     # Host-tool pre-build helpers (Docker-only)
@@ -184,7 +188,7 @@ class SqliteBuild(ZScript):
 
         # Phase 2: run configure inside Docker.
         log.info("Running configure inside Docker...")
-        self.run(*self._make_args("configure"), cwd=root, docker=True)
+        run(*self._make_args("configure"), cwd=root, docker=self.docker)
 
         # Phase 3: build remaining host tools on the host.
         host_tools = [
@@ -237,20 +241,12 @@ class SqliteBuild(ZScript):
                 else:
                     make_targets = ["test-integration"]
             if make_targets:
-                self.run(
-                    *self._make_args(*make_targets, docker=False),
-                    cwd=self.repo_root,
-                    docker=False,
-                )
+                run(*self._make_args(*make_targets), cwd=self.repo_root)
             if needs_functional:
                 self._run_functional_standalone()
         else:
             targets = self.targets or ["test"]
-            self.run(
-                *self._make_args(*targets, docker=False),
-                cwd=self.repo_root,
-                docker=False,
-            )
+            run(*self._make_args(*targets), cwd=self.repo_root)
 
     def _run_functional_standalone(self) -> None:
         """Run standalone functional tests using make_initrd.
@@ -275,7 +271,7 @@ class SqliteBuild(ZScript):
         print("  Running sqlite3.elf via nanvixd standalone...")
 
         # Bundle sqlite3.elf + daemons into an initrd.
-        initrd = self.make_initrd("sqlite3.elf")
+        initrd = make_initrd(self, "sqlite3.elf")
 
         sql_file = self.repo_root / ".nanvix" / "functional_test.sql"
 
@@ -287,12 +283,11 @@ class SqliteBuild(ZScript):
                 (ramfs_dir / "tmp").mkdir(exist_ok=True)
                 ramfs_img = tmpdir_path / "rootfs.img"
 
-                self.run(
+                run(
                     str(mkramfs),
                     "-o",
                     str(ramfs_img),
                     str(ramfs_dir),
-                    docker=False,
                 )
 
                 nanvixd = sysroot_path / "bin" / "nanvixd.elf"
@@ -303,7 +298,7 @@ class SqliteBuild(ZScript):
                     f' -- "{initrd}"'
                     f' < "{sql_file}"'
                 )
-                self.run("sh", "-c", cmd, docker=False, timeout=120)
+                run("sh", "-c", cmd, timeout=120)
         finally:
             if initrd.exists():
                 initrd.unlink()
@@ -390,7 +385,7 @@ class SqliteBuild(ZScript):
                 copied_elf = True
             initrd: Path | None = None
             try:
-                initrd = self.make_initrd(binary.name)
+                initrd = make_initrd(self, binary.name)
                 with tempfile.TemporaryDirectory(
                     prefix=f"nanvix_{name}_",
                     ignore_cleanup_errors=True,
@@ -401,12 +396,11 @@ class SqliteBuild(ZScript):
                     (ramfs_dir / "tmp").mkdir(exist_ok=True)
                     ramfs_img = tmpdir_path / f"rootfs_{name}.img"
 
-                    self.run(
+                    run(
                         str(mkramfs),
                         "-o",
                         str(ramfs_img),
                         str(ramfs_dir),
-                        docker=False,
                     )
 
                     result = subprocess.run(  # noqa: S603
@@ -446,26 +440,17 @@ class SqliteBuild(ZScript):
 
     def release(self) -> None:
         """Package the SQLite release tarball and verify it."""
-        self.run(
-            *self._make_args("package", docker=False),
-            cwd=self.repo_root,
-            docker=False,
-        )
-        self.run(
-            *self._make_args("verify-package", docker=False),
-            cwd=self.repo_root,
-            docker=False,
-        )
+        run(*self._make_args("package"), cwd=self.repo_root)
+        run(*self._make_args("verify-package"), cwd=self.repo_root)
 
     def clean(self) -> None:
         """Remove build artifacts."""
-        self.run(
+        run(
             "make",
             "-f",
             "Makefile.nanvix",
             "clean",
             cwd=self.repo_root,
-            docker=False,
         )
 
 
