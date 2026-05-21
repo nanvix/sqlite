@@ -17,10 +17,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-from nanvix_zutil import (  # type: ignore[import-not-found]
+from nanvix_zutil import (
     CFG_SYSROOT,
-    TOOLCHAIN_CONTAINER_PATH,
     EXIT_MISSING_DEP,
+    TOOLCHAIN_CONTAINER_PATH,
     ZScript,
     log,
 )
@@ -28,7 +28,6 @@ from nanvix_zutil import (  # type: ignore[import-not-found]
 IS_WINDOWS = sys.platform == "win32"
 
 # Makefile variable names (build-system-specific).
-_MAKE_VAR_CONFIG = "CONFIG_NANVIX"
 _MAKE_VAR_HOME = "NANVIX_HOME"
 _MAKE_VAR_TOOLCHAIN = "NANVIX_TOOLCHAIN"
 _MAKE_VAR_PLATFORM = "PLATFORM"
@@ -65,7 +64,6 @@ class SqliteBuild(ZScript):
             "make",
             "-f",
             "Makefile.nanvix",
-            f"{_MAKE_VAR_CONFIG}=y",
             f"{_MAKE_VAR_HOME}={sysroot_p}",
             f"{_MAKE_VAR_TOOLCHAIN}={toolchain_p}",
         ]
@@ -86,7 +84,7 @@ class SqliteBuild(ZScript):
         args.extend(targets)
         return args
 
-    def setup(self) -> None:
+    def setup(self) -> bool:
         """Download the Nanvix sysroot and dependencies.
 
         After the base setup installs dependencies into the buildroot,
@@ -98,7 +96,7 @@ class SqliteBuild(ZScript):
         buildroot = self.nanvix_dir / "buildroot"
         sysroot = self.config.get(CFG_SYSROOT, "")
         if not sysroot or not buildroot.is_dir():
-            return
+            return False
 
         sysroot_path = Path(sysroot)
         for subdir in ("lib", "include"):
@@ -112,13 +110,14 @@ class SqliteBuild(ZScript):
                 if item.is_dir():
                     shutil.copytree(item, target, dirs_exist_ok=True)
                     log.info(
-                        f"Merged directory {subdir}/{item.name}" " into sysroot",
+                        f"Merged directory {subdir}/{item.name} into sysroot",
                     )
                 elif not target.exists():
                     shutil.copy2(item, target)
                     log.info(
                         f"Merged {subdir}/{item.name} into sysroot",
                     )
+        return True
 
     def build(self) -> None:
         """Cross-compile libsqlite3.a and sqlite3.elf for Nanvix.
@@ -344,7 +343,7 @@ class SqliteBuild(ZScript):
         if not test_binaries:
             expected = ", ".join(sorted(test_allowlist))
             log.fatal(
-                f"No allowlisted test binaries found." f" Expected: {expected}.",
+                f"No allowlisted test binaries found. Expected: {expected}.",
                 code=EXIT_MISSING_DEP,
                 hint=(
                     "Build the test binaries first"
