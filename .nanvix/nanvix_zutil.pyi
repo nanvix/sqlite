@@ -7,6 +7,7 @@ from typing import Any, NoReturn
 
 CFG_SYSROOT: str
 CFG_TOOLCHAIN: str
+TOOLCHAIN_CONTAINER_PATH: Path
 EXIT_MISSING_DEP: int
 
 
