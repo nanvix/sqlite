@@ -17,10 +17,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-from nanvix_zutil import (  # type: ignore[import-not-found]
+from nanvix_zutil import (
     CFG_SYSROOT,
-    TOOLCHAIN_CONTAINER_PATH,
     EXIT_MISSING_DEP,
+    TOOLCHAIN_CONTAINER_PATH,
     ZScript,
     log,
 )
@@ -28,7 +28,6 @@ from nanvix_zutil import (  # type: ignore[import-not-found]
 IS_WINDOWS = sys.platform == "win32"
 
 # Makefile variable names (build-system-specific).
-_MAKE_VAR_CONFIG = "CONFIG_NANVIX"
 _MAKE_VAR_HOME = "NANVIX_HOME"
 _MAKE_VAR_TOOLCHAIN = "NANVIX_TOOLCHAIN"
 _MAKE_VAR_PLATFORM = "PLATFORM"
@@ -48,6 +47,7 @@ class SqliteBuild(ZScript):
         self,
         *targets: str,
         with_install_prefix: bool = True,
+        docker: bool | None = None,
     ) -> list[str]:
         """Build the common make argument list."""
         sysroot = self.config.get(CFG_SYSROOT, "")
@@ -58,14 +58,16 @@ class SqliteBuild(ZScript):
                 hint="Run `./z setup` first to download the sysroot.",
             )
         toolchain = str(TOOLCHAIN_CONTAINER_PATH)
-        sysroot_p = self.translate_path(Path(sysroot))
+        if docker is False:
+            sysroot_p = Path(sysroot)
+        else:
+            sysroot_p = self.translate_path(Path(sysroot))
         toolchain_p = toolchain
 
         args = [
             "make",
             "-f",
             "Makefile.nanvix",
-            f"{_MAKE_VAR_CONFIG}=y",
             f"{_MAKE_VAR_HOME}={sysroot_p}",
             f"{_MAKE_VAR_TOOLCHAIN}={toolchain_p}",
         ]
@@ -86,24 +88,21 @@ class SqliteBuild(ZScript):
         args.extend(targets)
         return args
 
-    def setup(self) -> None:
+    def setup(self) -> bool:
         """Download the Nanvix sysroot and dependencies.
 
         After the base setup installs dependencies into the buildroot,
         merge buildroot libraries and headers into the sysroot so the
         existing Makefile.nanvix can find them at its expected paths.
         """
-        super().setup()
-
-        buildroot = self.nanvix_dir / "buildroot"
-        sysroot = self.config.get(CFG_SYSROOT, "")
-        if not sysroot or not buildroot.is_dir():
-            return
-
-        sysroot_path = Path(sysroot)
+        failed = super().setup()
+        # pyright: ignore[reportOptionalMemberAccess]
+        assert self.buildroot is not None
+        buildroot = self.buildroot.create().path
+        sysroot = Path(self.config.get(CFG_SYSROOT, ""))
         for subdir in ("lib", "include"):
             src = buildroot / subdir
-            dst = sysroot_path / subdir
+            dst = sysroot / subdir
             if not src.is_dir():
                 continue
             dst.mkdir(parents=True, exist_ok=True)
@@ -112,28 +111,30 @@ class SqliteBuild(ZScript):
                 if item.is_dir():
                     shutil.copytree(item, target, dirs_exist_ok=True)
                     log.info(
-                        f"Merged directory {subdir}/{item.name}" " into sysroot",
+                        f"Merged directory {subdir}/{item.name} into sysroot",
                     )
                 elif not target.exists():
                     shutil.copy2(item, target)
                     log.info(
                         f"Merged {subdir}/{item.name} into sysroot",
                     )
+        return failed
 
     def build(self) -> None:
         """Cross-compile libsqlite3.a and sqlite3.elf for Nanvix.
-
-        When building inside Docker, the minimal toolchain image has no
-        host C compiler.  Host-side build tools (jimsh0, lemon, etc.)
-        are therefore pre-built on the runner and made available to the
-        container through the mounted workspace.
+        Cross-compilation requires local build tools (gcc) to be installed.
+        This is unavailable on Windows.
+        The prior build-in-docker route failed as well,
+        because there must be tools available on the _host_ to build the project.
+        Building in Docker on Windows is possible if zutils updates
+        the buildroot / tar-copy strategy, and if we build with the
+        full nanvix/toolchain:minimal target, as the pre-build tools
+        require gcc for x86, which does not ship with nanvix/toolchain-gcc
         """
-        if (
-            self.docker  # pyright: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
-            is not None
-        ):
-            self._prebuild_host_tools()
-        self.run(*self._make_args("all"), cwd=self.repo_root)
+        if IS_WINDOWS:
+            log.fatal("Unable to build on Windows.")
+        self._prebuild_host_tools()
+        self.run(*self._make_args("all"), cwd=self.repo_root, docker=True)
 
     # ------------------------------------------------------------------
     # Host-tool pre-build helpers (Docker-only)
@@ -148,10 +149,20 @@ class SqliteBuild(ZScript):
     def _prebuild_host_tools(self) -> None:
         """Build host-side tools needed by autosetup and the Makefile.
 
-        Phase 1 -- jimsh0 (TCL bootstrap for ``./configure``).
+        Linux/CI path: the official ``toolchain-gcc`` Docker image is
+        cross-only (ships ``i686-nanvix-gcc`` but no native ``cc``), so
+        any phase that needs a host compiler must run on the runner
+        outside the container.  Only Phase 2 (``./configure``) and the
+        final cross-compile run inside Docker.
+
+        Phase 1 -- jimsh0 (TCL bootstrap for ``./configure``) -- host cc.
         Phase 2 -- ``make configure`` inside Docker (generates Makefile).
         Phase 3 -- lemon, mkkeywordhash, mksourceid, srcck1, src-verify
                    compiled on the host using the generated Makefile.
+
+        TODO(toolchain-gcc): if/when the image grows a native ``gcc``,
+        Phases 1 and 3 can move back into Docker and this whole helper
+        collapses to the cross-build call.
         """
         root = self.repo_root
 
@@ -173,7 +184,7 @@ class SqliteBuild(ZScript):
 
         # Phase 2: run configure inside Docker.
         log.info("Running configure inside Docker...")
-        self.run(*self._make_args("configure"), cwd=root)
+        self.run(*self._make_args("configure"), cwd=root, docker=True)
 
         # Phase 3: build remaining host tools on the host.
         host_tools = [
@@ -226,12 +237,20 @@ class SqliteBuild(ZScript):
                 else:
                     make_targets = ["test-integration"]
             if make_targets:
-                self.run(*self._make_args(*make_targets), cwd=self.repo_root)
+                self.run(
+                    *self._make_args(*make_targets, docker=False),
+                    cwd=self.repo_root,
+                    docker=False,
+                )
             if needs_functional:
                 self._run_functional_standalone()
         else:
             targets = self.targets or ["test"]
-            self.run(*self._make_args(*targets), cwd=self.repo_root)
+            self.run(
+                *self._make_args(*targets, docker=False),
+                cwd=self.repo_root,
+                docker=False,
+            )
 
     def _run_functional_standalone(self) -> None:
         """Run standalone functional tests using make_initrd.
@@ -344,7 +363,7 @@ class SqliteBuild(ZScript):
         if not test_binaries:
             expected = ", ".join(sorted(test_allowlist))
             log.fatal(
-                f"No allowlisted test binaries found." f" Expected: {expected}.",
+                f"No allowlisted test binaries found. Expected: {expected}.",
                 code=EXIT_MISSING_DEP,
                 hint=(
                     "Build the test binaries first"
@@ -427,15 +446,15 @@ class SqliteBuild(ZScript):
 
     def release(self) -> None:
         """Package the SQLite release tarball and verify it."""
-        if (
-            self.docker  # pyright: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
-            is not None
-        ):
-            self._prebuild_host_tools()
-        self.run(*self._make_args("package"), cwd=self.repo_root)
         self.run(
-            *self._make_args("verify-package"),
+            *self._make_args("package", docker=False),
             cwd=self.repo_root,
+            docker=False,
+        )
+        self.run(
+            *self._make_args("verify-package", docker=False),
+            cwd=self.repo_root,
+            docker=False,
         )
 
     def clean(self) -> None:
@@ -446,6 +465,7 @@ class SqliteBuild(ZScript):
             "Makefile.nanvix",
             "clean",
             cwd=self.repo_root,
+            docker=False,
         )
 
 
