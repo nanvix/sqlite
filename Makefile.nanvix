@@ -1,119 +1,70 @@
-# Makefile.nanvix - SQLite cross-compilation for Nanvix
-#
 # Copyright(c) The Maintainers of Nanvix.
 # Licensed under the MIT License.
 #
-# Usage:
-#   make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME=/path/to/sysroot all
+# Usage: make -f Makefile.nanvix PLATFORM=<platform> PROCESS_MODE=<mode> \
+#    MEMORY_SIZE=<size> NANVIX_HOME=<home> NANVIX_TOOLCHAIN=<toolchain> [target]
 #
 # Targets:
-#   all              Build SQLite library and CLI
-#   test-smoke       Verify build artifacts exist and are valid (no runtime)
-#   test-integration Verify sqlite3 CLI binary links correctly
-#   test-functional  Run SQL queries on nanvixd.elf (requires KVM)
-#   test             Run all test levels
-#   package          Create portable release tarball in dist/
-#   install          Install library, headers, and CLI to PREFIX
-#   clean            Remove build artifacts
+#   all: Build SQLite library and CLI
+#   test: Run all tests (smoke, integration, functional)
+#   test-smoke: Verify build artifacts (no runtime needed)
+#   test-integration: Verify sqlite3 CLI binary links correctly
+#   test-functional: Run SQL queries on nanvixd$(EXE)
+#   package: Create a release tarball with build artifacts and headers
+#   verify-package: Verify the contents of the release tarball
+#   clean: Remove build artifacts
+#   distclean: Remove all generated files
 
 # ===========================================================================
-# Toolchain Detection
+# Global Variables
 # ===========================================================================
 
-NANVIX_DOCKER_IMAGE ?= ghcr.io/nanvix/toolchain-gcc:sha-34a3641
+# Some assumptions:
+# 1. This makefile is ONLY called by z.py
+# 2. Build mode ALWAYS runs in Docker
+# 3. Build ALWAYS runs before test and release
 
-ifdef CONFIG_NANVIX
-  NANVIX_TOOLCHAIN ?= /opt/nanvix
-  NANVIX_HOME ?= $(HOME)/nanvix
+.DEFAULT_GOAL=all
+EXE = .elf
+CONFIGURED_MARKER = .nanvix-configured
+_NANVIX_DOCKER_BUILD_GOALS := all build configure $(CONFIGURED_MARKER)
+_NANVIX_GOALS := $(or $(MAKECMDGOALS),$(.DEFAULT_GOAL))
 
-  ifndef CONFIG_NANVIX_DOCKER
-    ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc),)
-      DOCKER_AVAILABLE := $(shell command -v docker 2>/dev/null)
-      ifdef DOCKER_AVAILABLE
-        DOCKER_IMAGE_EXISTS := $(shell docker image inspect $(NANVIX_DOCKER_IMAGE) >/dev/null 2>&1 && echo yes)
-        ifdef DOCKER_IMAGE_EXISTS
-          CONFIG_NANVIX_DOCKER := y
-          $(info [nanvix] Using Docker (native toolchain not found at $(NANVIX_TOOLCHAIN)))
-        else
-          $(error Docker image $(NANVIX_DOCKER_IMAGE) not found. Run: docker pull $(NANVIX_DOCKER_IMAGE))
-        endif
-      else
-        $(error Nanvix toolchain not found at $(NANVIX_TOOLCHAIN) and Docker not available)
-      endif
-    endif
-  else
-    DOCKER_AVAILABLE := $(shell command -v docker 2>/dev/null)
-    ifndef DOCKER_AVAILABLE
-      $(error CONFIG_NANVIX_DOCKER=y but Docker is not installed)
-    endif
-    DOCKER_IMAGE_EXISTS := $(shell docker image inspect $(NANVIX_DOCKER_IMAGE) >/dev/null 2>&1 && echo yes)
-    ifndef DOCKER_IMAGE_EXISTS
-      $(error Docker image $(NANVIX_DOCKER_IMAGE) not found. Run: docker pull $(NANVIX_DOCKER_IMAGE))
-    endif
-    $(info [nanvix] Using Docker (explicitly requested))
-  endif
-
-  EXE = .elf
-  SYSROOT_PATH := $(abspath $(NANVIX_HOME))
-
-  ifdef CONFIG_NANVIX_DOCKER
-    DOCKER_TOOLCHAIN_PATH := /opt/nanvix
-    DOCKER_SYSROOT_PATH := /mnt/sysroot
-    DOCKER_WORKSPACE_PATH := /mnt/workspace
-    DOCKER_UID := $(shell id -u)
-    DOCKER_GID := $(shell id -g)
-    DOCKER_RUN := docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) \
-      -v $(CURDIR):$(DOCKER_WORKSPACE_PATH) \
-      -v $(SYSROOT_PATH):$(DOCKER_SYSROOT_PATH):ro \
-      -w $(DOCKER_WORKSPACE_PATH) \
-      -e HOME=/tmp \
-      $(NANVIX_DOCKER_IMAGE)
-    DOCKER_KVM_GID := $(shell stat -c '%g' /dev/kvm 2>/dev/null || echo 0)
-    DOCKER_RUN_FUNCTIONAL := docker run --rm --device /dev/kvm \
-      --user $(DOCKER_UID):$(DOCKER_GID) --group-add $(DOCKER_KVM_GID) \
-      -v $(CURDIR):$(DOCKER_WORKSPACE_PATH) \
-      -v $(SYSROOT_PATH):$(DOCKER_SYSROOT_PATH) \
-      -w $(DOCKER_SYSROOT_PATH) \
-      -e HOME=/tmp \
-      -e USER=$(shell whoami) \
-      $(NANVIX_DOCKER_IMAGE)
-    TOOLCHAIN_PREFIX := $(DOCKER_TOOLCHAIN_PATH)
-    SYSROOT_PREFIX := $(DOCKER_SYSROOT_PATH)
-    LIBC := $(DOCKER_TOOLCHAIN_PATH)/i686-nanvix/lib/libc.a
-    LIBM := $(DOCKER_TOOLCHAIN_PATH)/i686-nanvix/lib/libm.a
-    LIBPOSIX := $(DOCKER_SYSROOT_PATH)/lib/libposix.a
-    LIBZ := $(DOCKER_SYSROOT_PATH)/lib/libz.a
-  else
-    TOOLCHAIN_PREFIX := $(NANVIX_TOOLCHAIN)
-    SYSROOT_PREFIX := $(SYSROOT_PATH)
-    LIBC := $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libc.a
-    LIBM := $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libm.a
-    LIBPOSIX := $(SYSROOT_PATH)/lib/libposix.a
-    LIBZ := $(SYSROOT_PATH)/lib/libz.a
-  endif
-
-  # INSTALL_PREFIX: the prefix baked into compiled artifacts.
-  # Default to /sysroot for portable packages; override for local installs.
-  ifdef CONFIG_NANVIX_DOCKER
-    INSTALL_PREFIX ?= /sysroot
-  else
-    INSTALL_PREFIX ?= $(SYSROOT_PATH)
-  endif
-else
-  ifneq ($(MAKECMDGOALS),clean)
-    $(error CONFIG_NANVIX must be set to 'y'. Usage: make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME=/path/to/sysroot)
-  endif
-  EXE = .elf
+# Ensure required variables are defined
+_REQUIRED := PLATFORM PROCESS_MODE MEMORY_SIZE NANVIX_HOME NANVIX_TOOLCHAIN
+ifneq ($(filter-out clean distclean,$(_NANVIX_GOALS)),)
+  $(foreach v,$(_REQUIRED),\
+    $(if $($v),,$(error Required variable $v not set))\
+  )
 endif
 
+SYSROOT_PATH := $(abspath $(NANVIX_HOME))
+PREFIX ?= $(SYSROOT_PATH)
+INSTALL_PREFIX ?= $(SYSROOT_PATH)
+
 # ===========================================================================
-# Build Configuration
+# Build Mode Variables
 # ===========================================================================
 
-PREFIX ?= $(SYSROOT_PATH)
-PLATFORM ?= unknown
-PROCESS_MODE ?= unknown
-MEMORY_SIZE ?= unknown
+_BUILD := $(filter $(_NANVIX_DOCKER_BUILD_GOALS),$(_NANVIX_GOALS))
+_NONBUILD := $(filter-out $(_NANVIX_DOCKER_BUILD_GOALS),$(_NANVIX_GOALS))
+ifneq ($(_BUILD),)
+  # Error out if mixing build and non-build goals
+  ifneq ($(_NONBUILD),)
+    $(error Cannot mix build and non-build targets. Build targets: $(_NANVIX_DOCKER_BUILD_GOALS))
+  endif
+
+  ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc),)
+      $(error Nanvix toolchain not found at $(NANVIX_TOOLCHAIN))
+  endif
+endif
+
+TOOLCHAIN_PREFIX := $(NANVIX_TOOLCHAIN)
+SYSROOT_PREFIX := $(SYSROOT_PATH)
+LIBC := $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libc.a
+LIBM := $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libm.a
+LIBPOSIX := $(SYSROOT_PATH)/lib/libposix.a
+LIBZ := $(SYSROOT_PATH)/lib/libz.a
 
 CONFIGURE_ENV = \
 AR="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-ar" \
@@ -135,8 +86,6 @@ CONFIGURE_OPTS = \
 --disable-threadsafe \
 --disable-load-extension
 
-CONFIGURED_MARKER = .nanvix-configured
-
 # When a pre-built jimsh0 exists (built on the host for the minimal
 # Docker image), propagate B.tclsh=./jimsh0 to all sub-make invocations.
 BTCLSH_OVERRIDE = $(if $(wildcard jimsh0),B.tclsh=./jimsh0)
@@ -150,32 +99,15 @@ all: build
 configure: $(CONFIGURED_MARKER)
 
 $(CONFIGURED_MARKER):
-ifdef CONFIG_NANVIX_DOCKER
-	@# Pre-build autosetup bootstrap interpreter on the host so that
-	@# the (minimal) cross-compilation image does not need a host compiler.
-	@if [ ! -x jimsh0 ]; then \
-	  cc -o jimsh0 -DHAVE_REALPATH -DHAVE_DIRENT_H -DHAVE_SYS_TIME_H \
-	    autosetup/jimsh0.c 2>/dev/null || true; \
-	fi
-	$(DOCKER_RUN) sh -c '$(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS) --with-tclsh=./jimsh0'
-else
 	@if [ -x jimsh0 ]; then \
 	  $(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS) --with-tclsh=./jimsh0; \
 	else \
 	  $(CONFIGURE_ENV) ./configure $(CONFIGURE_OPTS); \
 	fi
-endif
 	touch $(CONFIGURED_MARKER)
 
 build: $(CONFIGURED_MARKER)
-ifdef CONFIG_NANVIX_DOCKER
-	@# Build host tools (lemon, mkkeywordhash, mksourceid) on the host
-	@# because the minimal cross-compilation image has no host compiler.
-	make lemon mksourceid mkkeywordhash srcck1 src-verify B.cc="cc" B.tclsh="./jimsh0" TOP="$(CURDIR)"
-	$(DOCKER_RUN) make -j$$(nproc) B.tclsh=./jimsh0 all
-else
 	make -j$$(nproc) $(BTCLSH_OVERRIDE) all
-endif
 	@if [ -f sqlite3 ] && [ ! -f sqlite3$(EXE) ]; then mv sqlite3 sqlite3$(EXE); fi
 
 # ===========================================================================
@@ -206,7 +138,7 @@ test-integration:
 	@file sqlite3$(EXE) | grep -qi 'ELF\|statically' && echo "  OK: valid ELF binary" || echo "  WARN: could not verify ELF format"
 	@echo "  PASS: SQLite integration tests"
 
-# --- Functional tests: run SQL queries on nanvixd.elf ---
+# --- Functional tests: run SQL queries on nanvixd$(EXE) ---
 test-functional:
 	@echo "=== SQLite functional tests ==="
 	@cp .nanvix/functional_test.sql _sqlite_test.sql
@@ -216,16 +148,9 @@ ifeq ($(PROCESS_MODE),standalone)
 	@PLATFORM="$(PLATFORM)" PROCESS_MODE="$(PROCESS_MODE)" MEMORY_SIZE="$(MEMORY_SIZE)" \
 		./z.sh --with-nanvix "$(NANVIX_HOME)" test test-functional
 else
-ifdef CONFIG_NANVIX_DOCKER
-	@echo "  Running sqlite3$(EXE) via nanvixd.elf (Docker)..."
-	$(DOCKER_RUN_FUNCTIONAL) sh -c \
-	  'timeout --foreground 120 ./bin/nanvixd.elf -- $(DOCKER_WORKSPACE_PATH)/sqlite3$(EXE) < $(DOCKER_WORKSPACE_PATH)/_sqlite_test.sql'
+	@echo "  Running sqlite3$(EXE) via nanvixd$(EXE)..."
+	cd "$(SYSROOT_PATH)" && timeout --foreground 120 ./bin/nanvixd$(EXE) -- $(abspath sqlite3$(EXE)) < $(abspath _sqlite_test.sql)
 	@echo "  PASS: sqlite3 (exit code 0)"
-else
-	@echo "  Running sqlite3$(EXE) via nanvixd.elf..."
-	cd "$(SYSROOT_PATH)" && timeout --foreground 120 ./bin/nanvixd.elf -- $(abspath sqlite3$(EXE)) < $(abspath _sqlite_test.sql)
-	@echo "  PASS: sqlite3 (exit code 0)"
-endif
 endif
 	@rm -f _sqlite_test.sql
 	@echo "  PASS: SQLite functional tests"
@@ -237,38 +162,45 @@ test: test-smoke test-integration test-functional
 # ===========================================================================
 # Package Target
 # ===========================================================================
+#
+# `package` produces the release tarball from build artifacts that already
+# exist in $(CURDIR). It does NOT depend on `build` and does NOT recurse
+# into the autosetup-generated Makefile: doing either would re-enter the
+# cross-compilation path (which is Docker-bound, since the autosetup
+# Makefile bakes container paths into $(TOP) and $(prefix) at configure
+# time). Instead we replicate the upstream `install` rules' essential
+# behaviour with a flat sequence of host-side `install(1)` invocations,
+# which require no toolchain. This lets `./z release` run natively.
+#
+# Build is the sole producer of the artifacts listed below; release
+# (which invokes this target) is a pure consumer and hard-fails if any
+# expected artifact is missing.
 
-package: build
+package:
 	@echo "=== Packaging SQLite release ==="
 	$(eval ARTIFACT_NAME := sqlite-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
 	$(eval STAGING := $(CURDIR)/dist/$(ARTIFACT_NAME))
+	@for f in libsqlite3.a sqlite3.h src/sqlite3ext.h sqlite3$(EXE); do \
+	  if [ ! -f "$$f" ]; then \
+	    echo "FAIL: missing build artifact: $$f"; \
+	    echo "      Run './z build' first."; \
+	    exit 1; \
+	  fi; \
+	done
 	rm -rf $(STAGING)
-ifdef CONFIG_NANVIX_DOCKER
-  ifdef DESTDIR
-	docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) \
-	  -v $(CURDIR):$(DOCKER_WORKSPACE_PATH) \
-	  -v $(SYSROOT_PATH):$(DOCKER_SYSROOT_PATH):ro \
-	  -v $(STAGING):$(STAGING) \
-	  -w $(DOCKER_WORKSPACE_PATH) \
-	  -e HOME=/tmp \
-	  $(NANVIX_DOCKER_IMAGE) make install B.tclsh=./jimsh0 DESTDIR="$(STAGING)"
-  else
-	$(DOCKER_RUN) make install B.tclsh=./jimsh0 DESTDIR="$(DOCKER_WORKSPACE_PATH)/dist/$(ARTIFACT_NAME)"
-  endif
-else
-	make install $(BTCLSH_OVERRIDE) DESTDIR="$(STAGING)"
-endif
-	@# Ensure sysroot/ layout: move INSTALL_PREFIX contents to sysroot/
-	@if [ -d "$(STAGING)/sysroot" ]; then \
-	  echo "  sysroot/ layout already present"; \
-	elif [ -d "$(STAGING)$(INSTALL_PREFIX)" ]; then \
-	  mkdir -p "$(STAGING)/sysroot"; \
-	  cp -rf "$(STAGING)$(INSTALL_PREFIX)"/* "$(STAGING)/sysroot/"; \
-	  rm -rf "$(STAGING)$(INSTALL_PREFIX)"; \
+	install -d "$(STAGING)/sysroot/bin" \
+	           "$(STAGING)/sysroot/lib" \
+	           "$(STAGING)/sysroot/lib/pkgconfig" \
+	           "$(STAGING)/sysroot/include" \
+	           "$(STAGING)/sysroot/share/man/man1"
+	install -m 644 libsqlite3.a               "$(STAGING)/sysroot/lib/"
+	install -m 644 sqlite3.h src/sqlite3ext.h "$(STAGING)/sysroot/include/"
+	install -m 755 sqlite3$(EXE)              "$(STAGING)/sysroot/bin/sqlite3.elf"
+	@if [ -f sqlite3.1 ]; then \
+	  install -m 644 sqlite3.1 "$(STAGING)/sysroot/share/man/man1/"; \
 	fi
-	@# Preserve .elf naming convention
-	@if [ -f "$(STAGING)/sysroot/bin/sqlite3" ] && [ ! -e "$(STAGING)/sysroot/bin/sqlite3.elf" ]; then \
-	  cp "$(STAGING)/sysroot/bin/sqlite3" "$(STAGING)/sysroot/bin/sqlite3.elf"; \
+	@if [ -f sqlite3.pc ]; then \
+	  install -m 644 sqlite3.pc "$(STAGING)/sysroot/lib/pkgconfig/"; \
 	fi
 	tar -czf dist/$(ARTIFACT_NAME).tar.gz -C $(STAGING) sysroot
 	@echo "  Package: dist/$(ARTIFACT_NAME).tar.gz"
@@ -294,26 +226,8 @@ verify-package:
 	echo "  PASS: SQLite package verification"
 
 # ===========================================================================
-# Install / Clean
+# Clean
 # ===========================================================================
-
-install: build
-ifdef CONFIG_NANVIX_DOCKER
-  ifdef DESTDIR
-	docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) \
-	  -v $(CURDIR):$(DOCKER_WORKSPACE_PATH) \
-	  -v $(SYSROOT_PATH):$(DOCKER_SYSROOT_PATH):ro \
-	  -v $(abspath $(DESTDIR)):$(abspath $(DESTDIR)) \
-	  -w $(DOCKER_WORKSPACE_PATH) \
-	  -e HOME=/tmp \
-	  $(NANVIX_DOCKER_IMAGE) make install B.tclsh=./jimsh0 DESTDIR="$(abspath $(DESTDIR))"
-  else
-	$(DOCKER_RUN) make install B.tclsh=./jimsh0
-  endif
-else
-	make install $(BTCLSH_OVERRIDE) DESTDIR="$(DESTDIR)"
-endif
-
 clean:
 	-make clean 2>/dev/null || true
 	rm -f $(CONFIGURED_MARKER) sqlite3$(EXE) _sqlite_test.sql jimsh0 lemon mksourceid mkkeywordhash srcck1 src-verify lempar.c
@@ -323,4 +237,4 @@ distclean: clean
 	-make distclean 2>/dev/null || true
 	git clean -fdx -e Makefile.nanvix -e NANVIX.md -e .github -e nanvix-artifacts 2>/dev/null || true
 
-.PHONY: all configure build clean distclean test test-smoke test-integration test-functional package verify-package install
+.PHONY: all configure build clean distclean test test-smoke test-integration test-functional package verify-package
