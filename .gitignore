@@ -51,3 +51,6 @@ src-verify
 
 # Temp directories
 tsrc/
+
+# Nanvix
+nanvixd_*.log
