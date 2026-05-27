@@ -200,7 +200,7 @@ class SqliteBuild(ZScript):
             "fi; "
             f"{configure_cmd}; "
             "make lemon mksourceid mkkeywordhash srcck1 src-verify "
-            "  B.cc=cc B.tclsh=./jimsh0 TOP=\"$PWD\"; "
+            '  B.cc=cc B.tclsh=./jimsh0 TOP="$PWD"; '
             f"{all_cmd}"
         )
 
@@ -283,34 +283,23 @@ class SqliteBuild(ZScript):
     def test(self) -> None:
         """Run the test suite.
 
-        Smoke and integration tests are always delegated to the Makefile.
-        The functional test in standalone mode is handled in Python via
-        make_initrd so that initrd creation is shared across platforms.
+        Only functional tests are supported. In standalone mode the
+        functional test is handled in Python via make_initrd so that
+        initrd creation is shared across platforms.
         """
         if IS_WINDOWS:
             self._run_tests_windows()
             return
 
         if self.config.deployment_mode == "standalone":
-            targets = self.targets if self.targets else []
-            # Targets that require the Python functional path.
-            _functional_targets = {"test", "test-functional"}
-            needs_functional = not targets or bool(set(targets) & _functional_targets)
-            # Delegate non-functional targets to the Makefile.
-            make_targets = [t for t in targets if t not in _functional_targets]
-            if not targets:
-                make_targets = ["test-smoke", "test-integration"]
-            elif needs_functional and not make_targets:
-                # Ensure Makefile prerequisites run when only functional
-                # targets are requested (build + smoke/integration).
-                if "test" in targets:
-                    make_targets = ["test-smoke", "test-integration"]
-                else:
-                    make_targets = ["test-integration"]
-            if make_targets:
-                run(*self._make_args(*make_targets), cwd=self.repo_root)
-            if needs_functional:
-                self._run_functional_standalone()
+            allowed = {"test", "test-functional"}
+            unknown = [t for t in self.targets if t not in allowed]
+            if unknown:
+                log.fatal(
+                    f"Unsupported test target(s) in standalone mode: {unknown}. "
+                    f"Allowed: {sorted(allowed)}.",
+                )
+            self._run_functional_standalone()
         else:
             targets = self.targets or ["test"]
             run(*self._make_args(*targets), cwd=self.repo_root)
