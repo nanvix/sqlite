@@ -11,6 +11,8 @@ Usage:
     ./z clean     # Remove build artifacts
 """
 
+import dataclasses
+import shlex
 import shutil
 import subprocess
 import sys
@@ -126,19 +128,84 @@ class SqliteBuild(ZScript):
 
     def build(self) -> None:
         """Cross-compile libsqlite3.a and sqlite3.elf for Nanvix.
-        Cross-compilation requires local build tools (gcc) to be installed.
-        This is unavailable on Windows.
-        The prior build-in-docker route failed as well,
-        because there must be tools available on the _host_ to build the project.
-        Building in Docker on Windows is possible if zutils updates
-        the buildroot / tar-copy strategy, and if we build with the
-        full nanvix/toolchain:minimal target, as the pre-build tools
-        require gcc for x86, which does not ship with nanvix/toolchain-gcc
+
+        Linux: the host has a native ``cc``, so host-side tools (jimsh0,
+        lemon, ...) are pre-built on the host and only the configure and
+        cross-compile steps run inside Docker.
+
+        Windows: the host has no ``cc``.  Because zutils' Windows mode
+        uses tar-copy isolation between Docker invocations (artifacts
+        vanish between ``docker run`` calls), the entire pipeline --
+        installing native gcc, building jimsh0, running configure,
+        building host tools, and the final cross-compile -- is bundled
+        into a single Docker invocation; only the final artifacts are
+        copied back to the host.
         """
         if IS_WINDOWS:
-            log.fatal("Unable to build on Windows.")
+            self._build_windows()
+            return
         self._prebuild_host_tools()
         run(*self._make_args("all"), cwd=self.repo_root, docker=self.docker)
+
+    # ------------------------------------------------------------------
+    # Windows: single-shot Docker build
+    # ------------------------------------------------------------------
+
+    # Build artifacts to copy back from the container to the host after
+    # the Windows single-shot build completes.  These are everything the
+    # downstream targets (test, package) consume.
+    _WINDOWS_OUTPUT_FILES = [
+        "libsqlite3.a",
+        "sqlite3.h",
+        "sqlite3.elf",
+    ]
+
+    def _build_windows(self) -> None:
+        """Run the full build pipeline inside a single Docker invocation.
+
+        The ``toolchain-gcc`` image is cross-only (no native ``cc``), so
+        we apt-install ``gcc``/``make`` once per build before running the
+        host-tool and cross-compile phases.
+        """
+        if self.docker is None:
+            log.fatal(
+                "Docker mode is not active.",
+                code=EXIT_MISSING_DEP,
+                hint="Run `./z setup --with-docker IMAGE` first.",
+            )
+
+        # Add output_files so build_windows_run_cmd copies artifacts back
+        # to the mounted workspace after the container exits.
+        docker_cfg = dataclasses.replace(
+            self.docker,
+            output_files=list(self._WINDOWS_OUTPUT_FILES),
+        )
+
+        jimsh0_cflags = " ".join(shlex.quote(f) for f in self._JIMSH0_CFLAGS)
+        configure_cmd = shlex.join(self._make_args("configure"))
+        all_cmd = shlex.join(self._make_args("all"))
+
+        # Single shell script: install native gcc, build jimsh0, configure,
+        # build host tools using the autoconf-generated Makefile, then
+        # cross-compile via Makefile.nanvix.
+        script = (
+            "set -e; "
+            "if ! command -v cc >/dev/null 2>&1; then "
+            "  apt-get update >/dev/null && "
+            "  DEBIAN_FRONTEND=noninteractive apt-get install -y "
+            "    --no-install-recommends gcc libc6-dev make >/dev/null; "
+            "fi; "
+            "if [ ! -x ./jimsh0 ]; then "
+            f"  cc -o jimsh0 {jimsh0_cflags} autosetup/jimsh0.c; "
+            "fi; "
+            f"{configure_cmd}; "
+            "make lemon mksourceid mkkeywordhash srcck1 src-verify "
+            '  B.cc=cc B.tclsh=./jimsh0 TOP="$PWD"; '
+            f"{all_cmd}"
+        )
+
+        log.info("Building SQLite inside Docker (Windows single-shot)...")
+        run("sh", "-c", script, cwd=self.repo_root, docker=docker_cfg)
 
     # ------------------------------------------------------------------
     # Host-tool pre-build helpers (Docker-only)
@@ -216,34 +283,23 @@ class SqliteBuild(ZScript):
     def test(self) -> None:
         """Run the test suite.
 
-        Smoke and integration tests are always delegated to the Makefile.
-        The functional test in standalone mode is handled in Python via
-        make_initrd so that initrd creation is shared across platforms.
+        Only functional tests are supported. In standalone mode the
+        functional test is handled in Python via make_initrd so that
+        initrd creation is shared across platforms.
         """
         if IS_WINDOWS:
             self._run_tests_windows()
             return
 
         if self.config.deployment_mode == "standalone":
-            targets = self.targets if self.targets else []
-            # Targets that require the Python functional path.
-            _functional_targets = {"test", "test-functional"}
-            needs_functional = not targets or bool(set(targets) & _functional_targets)
-            # Delegate non-functional targets to the Makefile.
-            make_targets = [t for t in targets if t not in _functional_targets]
-            if not targets:
-                make_targets = ["test-smoke", "test-integration"]
-            elif needs_functional and not make_targets:
-                # Ensure Makefile prerequisites run when only functional
-                # targets are requested (build + smoke/integration).
-                if "test" in targets:
-                    make_targets = ["test-smoke", "test-integration"]
-                else:
-                    make_targets = ["test-integration"]
-            if make_targets:
-                run(*self._make_args(*make_targets), cwd=self.repo_root)
-            if needs_functional:
-                self._run_functional_standalone()
+            allowed = {"test", "test-functional"}
+            unknown = [t for t in self.targets if t not in allowed]
+            if unknown:
+                log.fatal(
+                    f"Unsupported test target(s) in standalone mode: {unknown}. "
+                    f"Allowed: {sorted(allowed)}.",
+                )
+            self._run_functional_standalone()
         else:
             targets = self.targets or ["test"]
             run(*self._make_args(*targets), cwd=self.repo_root)

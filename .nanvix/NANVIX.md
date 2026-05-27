@@ -271,7 +271,7 @@ The CI runs on all platform × process-mode × memory combinations:
 | microvm | single-process | 128mb, 256mb | Linux |
 | microvm | multi-process | 128mb, 256mb | Linux |
 
-All Linux configurations run full tests (smoke, integration, and functional) in parallel with `fail-fast: false`, ensuring that all platforms are tested even if one fails. Windows standalone tests use `nanvixd.exe` to run `sqlite3.elf` with functional SQL queries.
+All Linux configurations run functional tests in parallel with `fail-fast: false`, ensuring that all platforms are tested even if one fails. Windows standalone tests use `nanvixd.exe` to run `sqlite3.elf` with functional SQL queries.
 
 ### Dependency Management
 

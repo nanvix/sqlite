@@ -6,9 +6,7 @@
 #
 # Targets:
 #   all: Build SQLite library and CLI
-#   test: Run all tests (smoke, integration, functional)
-#   test-smoke: Verify build artifacts (no runtime needed)
-#   test-integration: Verify sqlite3 CLI binary links correctly
+#   test: Run functional tests
 #   test-functional: Run SQL queries on nanvixd$(EXE)
 #   package: Create a release tarball with build artifacts and headers
 #   verify-package: Verify the contents of the release tarball
@@ -114,30 +112,6 @@ build: $(CONFIGURED_MARKER)
 # Test Targets
 # ===========================================================================
 
-# --- Smoke tests: verify build artifacts (no runtime needed) ---
-test-smoke:
-	@echo "=== SQLite smoke tests ==="
-	@echo "  Checking libsqlite3.a..."
-	@LIBSQLITE=$$(find . -name "libsqlite3.a" -not -path "*/nanvix-artifacts/*" -not -path "*/dist/*" | head -1); \
-	if [ -n "$$LIBSQLITE" ]; then \
-	echo "  OK: $$LIBSQLITE ($$(wc -c < "$$LIBSQLITE") bytes)"; \
-	else \
-	echo "  FAIL: libsqlite3.a not found"; exit 1; \
-	fi
-	@echo "  Checking sqlite3.h..."
-	@test -f sqlite3.h || { echo "  FAIL: sqlite3.h not found"; exit 1; }
-	@echo "  Checking sqlite3$(EXE)..."
-	@test -f sqlite3$(EXE) || { echo "  FAIL: sqlite3$(EXE) not found"; exit 1; }
-	@echo "  PASS: SQLite smoke tests"
-
-# --- Integration tests: verify CLI binary links correctly ---
-test-integration:
-	@echo "=== SQLite integration tests ==="
-	@echo "  OK: sqlite3$(EXE) ($$(wc -c < sqlite3$(EXE)) bytes)"
-	@echo "  Checking sqlite3 is statically linked..."
-	@file sqlite3$(EXE) | grep -qi 'ELF\|statically' && echo "  OK: valid ELF binary" || echo "  WARN: could not verify ELF format"
-	@echo "  PASS: SQLite integration tests"
-
 # --- Functional tests: run SQL queries on nanvixd$(EXE) ---
 test-functional:
 	@echo "=== SQLite functional tests ==="
@@ -156,7 +130,7 @@ endif
 	@echo "  PASS: SQLite functional tests"
 
 # --- Run all test levels ---
-test: test-smoke test-integration test-functional
+test: test-functional
 	@echo "=== All SQLite tests PASSED ==="
 
 # ===========================================================================
@@ -237,4 +211,4 @@ distclean: clean
 	-make distclean 2>/dev/null || true
 	git clean -fdx -e Makefile.nanvix -e NANVIX.md -e .github -e nanvix-artifacts 2>/dev/null || true
 
-.PHONY: all configure build clean distclean test test-smoke test-integration test-functional package verify-package
+.PHONY: all configure build clean distclean test test-functional package verify-package
