@@ -5,11 +5,10 @@
 #    MEMORY_SIZE=<size> NANVIX_HOME=<home> NANVIX_TOOLCHAIN=<toolchain> [target]
 #
 # Targets:
-#   all: Build SQLite library and CLI
+#   all: Build SQLite library and CLI, then stage via install
+#   install: Stage built artifacts into LIB_OUT/INCLUDE_OUT/BIN_OUT
 #   test: Run functional tests
 #   test-functional: Run SQL queries on nanvixd$(EXE)
-#   package: Create a release tarball with build artifacts and headers
-#   verify-package: Verify the contents of the release tarball
 #   clean: Remove build artifacts
 #   distclean: Remove all generated files
 
@@ -25,11 +24,21 @@
 .DEFAULT_GOAL=all
 EXE = .elf
 CONFIGURED_MARKER = .nanvix-configured
-_NANVIX_DOCKER_BUILD_GOALS := all build configure $(CONFIGURED_MARKER)
+_NANVIX_DOCKER_BUILD_GOALS := all build install configure $(CONFIGURED_MARKER)
 _NANVIX_GOALS := $(or $(MAKECMDGOALS),$(.DEFAULT_GOAL))
 
 # Ensure required variables are defined
-_REQUIRED := PLATFORM PROCESS_MODE MEMORY_SIZE NANVIX_HOME NANVIX_TOOLCHAIN
+_REQUIRED := PLATFORM \
+    PROCESS_MODE \
+    MEMORY_SIZE \
+    NANVIX_HOME \
+    NANVIX_TOOLCHAIN \
+    NANVIX_ROOT \
+    OUT_DIR \
+    DIST_DIR \
+    LIB_OUT \
+    INCLUDE_OUT \
+    BIN_OUT
 ifneq ($(filter-out clean distclean,$(_NANVIX_GOALS)),)
   $(foreach v,$(_REQUIRED),\
     $(if $($v),,$(error Required variable $v not set))\
@@ -39,6 +48,12 @@ endif
 SYSROOT_PATH := $(abspath $(NANVIX_HOME))
 PREFIX ?= $(SYSROOT_PATH)
 INSTALL_PREFIX ?= $(SYSROOT_PATH)
+
+# Artifacts staged by `install` into the release/test output tree so that
+# `./z release` (which packages release_dir()) can find them.
+LIB_ARTIFACTS     := libsqlite3.a
+INCLUDE_ARTIFACTS := sqlite3.h src/sqlite3ext.h
+BIN_ARTIFACTS     := sqlite3$(EXE)
 
 # ===========================================================================
 # Build Mode Variables
@@ -92,7 +107,7 @@ BTCLSH_OVERRIDE = $(if $(wildcard jimsh0),B.tclsh=./jimsh0)
 # Build Targets
 # ===========================================================================
 
-all: build
+all: build install
 
 configure: $(CONFIGURED_MARKER)
 
@@ -107,6 +122,14 @@ $(CONFIGURED_MARKER):
 build: $(CONFIGURED_MARKER)
 	make -j$$(nproc) $(BTCLSH_OVERRIDE) all
 	@if [ -f sqlite3 ] && [ ! -f sqlite3$(EXE) ]; then mv sqlite3 sqlite3$(EXE); fi
+
+# Stage built artifacts into the release/test output tree so that
+# `./z release` (which packages release_dir()) can find them.
+install: build
+	@mkdir -p $(LIB_OUT) $(INCLUDE_OUT) $(BIN_OUT)
+	install -m 644 $(LIB_ARTIFACTS)     $(LIB_OUT)/
+	install -m 644 $(INCLUDE_ARTIFACTS) $(INCLUDE_OUT)/
+	install -m 755 $(BIN_ARTIFACTS)     $(BIN_OUT)/
 
 # ===========================================================================
 # Test Targets
@@ -134,81 +157,15 @@ test: test-functional
 	@echo "=== All SQLite tests PASSED ==="
 
 # ===========================================================================
-# Package Target
-# ===========================================================================
-#
-# `package` produces the release tarball from build artifacts that already
-# exist in $(CURDIR). It does NOT depend on `build` and does NOT recurse
-# into the autosetup-generated Makefile: doing either would re-enter the
-# cross-compilation path (which is Docker-bound, since the autosetup
-# Makefile bakes container paths into $(TOP) and $(prefix) at configure
-# time). Instead we replicate the upstream `install` rules' essential
-# behaviour with a flat sequence of host-side `install(1)` invocations,
-# which require no toolchain. This lets `./z release` run natively.
-#
-# Build is the sole producer of the artifacts listed below; release
-# (which invokes this target) is a pure consumer and hard-fails if any
-# expected artifact is missing.
-
-package:
-	@echo "=== Packaging SQLite release ==="
-	$(eval ARTIFACT_NAME := sqlite-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
-	$(eval STAGING := $(CURDIR)/dist/$(ARTIFACT_NAME))
-	@for f in libsqlite3.a sqlite3.h src/sqlite3ext.h sqlite3$(EXE); do \
-	  if [ ! -f "$$f" ]; then \
-	    echo "FAIL: missing build artifact: $$f"; \
-	    echo "      Run './z build' first."; \
-	    exit 1; \
-	  fi; \
-	done
-	rm -rf $(STAGING)
-	install -d "$(STAGING)/sysroot/bin" \
-	           "$(STAGING)/sysroot/lib" \
-	           "$(STAGING)/sysroot/lib/pkgconfig" \
-	           "$(STAGING)/sysroot/include" \
-	           "$(STAGING)/sysroot/share/man/man1"
-	install -m 644 libsqlite3.a               "$(STAGING)/sysroot/lib/"
-	install -m 644 sqlite3.h src/sqlite3ext.h "$(STAGING)/sysroot/include/"
-	install -m 755 sqlite3$(EXE)              "$(STAGING)/sysroot/bin/sqlite3.elf"
-	@if [ -f sqlite3.1 ]; then \
-	  install -m 644 sqlite3.1 "$(STAGING)/sysroot/share/man/man1/"; \
-	fi
-	@if [ -f sqlite3.pc ]; then \
-	  install -m 644 sqlite3.pc "$(STAGING)/sysroot/lib/pkgconfig/"; \
-	fi
-	tar -czf dist/$(ARTIFACT_NAME).tar.gz -C $(STAGING) sysroot
-	@echo "  Package: dist/$(ARTIFACT_NAME).tar.gz"
-	@echo "  Contents:"
-	@tar tzf dist/$(ARTIFACT_NAME).tar.gz | head -20
-
-# ===========================================================================
-# Verify Package
-# ===========================================================================
-
-verify-package:
-	@echo "=== Verifying SQLite package ==="
-	$(eval ARTIFACT_NAME := sqlite-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
-	@TARBALL="dist/$(ARTIFACT_NAME).tar.gz"; \
-	if [ ! -f "$$TARBALL" ]; then \
-	  echo "FAIL: Package tarball not found: $$TARBALL"; exit 1; \
-	fi; \
-	echo "Package contents:"; \
-	tar tzf "$$TARBALL"; \
-	if ! tar tzf "$$TARBALL" | grep -q 'sysroot/lib/'; then \
-	  echo "FAIL: Package missing sysroot/lib/ entries"; exit 1; \
-	fi; \
-	echo "  PASS: SQLite package verification"
-
-# ===========================================================================
 # Clean
 # ===========================================================================
 clean:
 	-make clean 2>/dev/null || true
 	rm -f $(CONFIGURED_MARKER) sqlite3$(EXE) _sqlite_test.sql jimsh0 lemon mksourceid mkkeywordhash srcck1 src-verify lempar.c
-	rm -rf dist/
+	rm -rf $(OUT_DIR) dist/
 
 distclean: clean
 	-make distclean 2>/dev/null || true
 	git clean -fdx -e Makefile.nanvix -e NANVIX.md -e .github -e nanvix-artifacts 2>/dev/null || true
 
-.PHONY: all configure build clean distclean test test-functional package verify-package
+.PHONY: all configure build install clean distclean test test-functional
