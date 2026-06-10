@@ -189,6 +189,7 @@ class SqliteBuild(ZScript):
         root = repo_root()
         return [
             str((lib_out() / "libsqlite3.a").relative_to(root)),
+            str((lib_out() / "libsqlite3.so").relative_to(root)),
             str((include_out() / "sqlite3.h").relative_to(root)),
             str((include_out() / "sqlite3ext.h").relative_to(root)),
             str((bin_out() / "sqlite3.elf").relative_to(root)),

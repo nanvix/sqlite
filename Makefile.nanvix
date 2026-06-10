@@ -51,7 +51,7 @@ INSTALL_PREFIX ?= $(SYSROOT_PATH)
 
 # Artifacts staged by `install` into the release/test output tree so that
 # `./z release` (which packages release_dir()) can find them.
-LIB_ARTIFACTS     := libsqlite3.a
+LIB_ARTIFACTS     := libsqlite3.a libsqlite3.so
 INCLUDE_ARTIFACTS := sqlite3.h src/sqlite3ext.h
 BIN_ARTIFACTS     := sqlite3$(EXE)
 
@@ -93,7 +93,7 @@ CC="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-gcc" \
 CXX="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-g++" \
 CPP="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-cpp" \
 LD="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-ld" \
-CFLAGS="-I$(SYSROOT_PREFIX)/include -DSQLITE_OMIT_WAL=1" \
+CFLAGS="-I$(SYSROOT_PREFIX)/include -fPIC -DSQLITE_OMIT_WAL=1" \
 LDFLAGS="-static -T$(SYSROOT_PREFIX)/lib/user.ld -L$(SYSROOT_PREFIX)/lib -Wl,--allow-multiple-definition -Wl,--start-group $(LIBCRT0) $(LIBPOSIX) $(LIBC) $(LIBM) $(LIBZ) -Wl,--end-group" \
 LIBS="-Wl,--start-group $(LIBCRT0) $(LIBPOSIX) $(LIBC) $(LIBM) $(LIBZ) -Wl,--end-group"
 
@@ -129,6 +129,27 @@ $(CONFIGURED_MARKER):
 build: $(CONFIGURED_MARKER)
 	make -j$$(nproc) $(BTCLSH_OVERRIDE) all
 	@if [ -f sqlite3 ] && [ ! -f sqlite3$(EXE) ]; then mv sqlite3 sqlite3$(EXE); fi
+	@# Link libsqlite3.so from the (now PIC) static archive via
+	@# --whole-archive so every sqlite3 entry point becomes part of the
+	@# .so's .dynsym.  Set DT_SONAME so consumers that link `-lsqlite3`
+	@# against this .so emit a proper DT_NEEDED entry.  libc / libm /
+	@# libz symbols are left UND via -nostdlib and bind at dlopen time
+	@# against the host executable's .dynsym, matching the model used
+	@# by other Nanvix shared libraries such as libffi.so / libssl.so.
+	@#
+	@# `-static-libgcc -lgcc` embeds the small set of libgcc helpers
+	@# that sqlite3.c needs for 64-bit integer arithmetic on i686
+	@# (__divdi3 / __moddi3 / __udivdi3 / __umoddi3, all STV_HIDDEN
+	@# inside libgcc).  Without them, ld leaves the symbols UND in
+	@# libsqlite3.so and the cpython configure-time hello-world probe
+	@# (`-lsqlite3 -lpthread -ldl`, no libgcc) fails to link, which
+	@# silently drops `-lsqlite3` from `_sqlite3.cpython-312.so`'s
+	@# DT_NEEDED list and breaks dlopen at runtime.
+	$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-gcc -shared -fPIC -nostdlib \
+	    -Wl,-soname,libsqlite3.so -Wl,-z,noexecstack \
+	    -Wl,--whole-archive libsqlite3.a -Wl,--no-whole-archive \
+	    -static-libgcc -lgcc \
+	    -o libsqlite3.so
 
 # Stage built artifacts into the release/test output tree so that
 # `./z release` (which packages release_dir()) can find them.
@@ -169,6 +190,7 @@ test: test-functional
 clean:
 	-make clean 2>/dev/null || true
 	rm -f $(CONFIGURED_MARKER) sqlite3$(EXE) _sqlite_test.sql jimsh0 lemon mksourceid mkkeywordhash srcck1 src-verify lempar.c
+	rm -f libsqlite3.so
 	rm -rf $(OUT_DIR) dist/
 
 distclean: clean
