@@ -78,6 +78,13 @@ LIBC := $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libc.a
 LIBM := $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libm.a
 LIBPOSIX := $(SYSROOT_PATH)/lib/libposix.a
 LIBZ := $(SYSROOT_PATH)/lib/libz.a
+# Since Nanvix 0.16.19, process startup (`_start`) and `__nanvix_main` live in
+# libnvx_crt0.a, which drives `__nanvix_libc_start_main` in libposix.a. It must
+# be linked first so its strong symbols win over the toolchain's weak stubs
+# (otherwise the link fails with an undefined reference to `__nanvix_main`).
+# libnvx_crt0.a and libposix.a share some kcall objects, so allow multiple
+# definitions to resolve the overlap.
+LIBCRT0 := $(SYSROOT_PATH)/lib/libnvx_crt0.a
 
 CONFIGURE_ENV = \
 AR="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-ar" \
@@ -87,8 +94,8 @@ CXX="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-g++" \
 CPP="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-cpp" \
 LD="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-ld" \
 CFLAGS="-I$(SYSROOT_PREFIX)/include -DSQLITE_OMIT_WAL=1" \
-LDFLAGS="-static -T$(SYSROOT_PREFIX)/lib/user.ld -L$(SYSROOT_PREFIX)/lib -Wl,--start-group $(LIBPOSIX) $(LIBC) $(LIBM) $(LIBZ) -Wl,--end-group" \
-LIBS="-Wl,--start-group $(LIBPOSIX) $(LIBC) $(LIBM) $(LIBZ) -Wl,--end-group"
+LDFLAGS="-static -T$(SYSROOT_PREFIX)/lib/user.ld -L$(SYSROOT_PREFIX)/lib -Wl,--allow-multiple-definition -Wl,--start-group $(LIBCRT0) $(LIBPOSIX) $(LIBC) $(LIBM) $(LIBZ) -Wl,--end-group" \
+LIBS="-Wl,--start-group $(LIBCRT0) $(LIBPOSIX) $(LIBC) $(LIBM) $(LIBZ) -Wl,--end-group"
 
 CONFIGURE_OPTS = \
 --disable-shared \
