@@ -37,6 +37,7 @@ from nanvix_zutil.paths import (
     nanvix_root,
     out_dir,
     repo_root,
+    test_out,
 )
 
 IS_WINDOWS = sys.platform == "win32"
@@ -161,9 +162,12 @@ class SqliteBuild(ZScript):
         """
         if IS_WINDOWS:
             self._build_windows()
-            return
-        self._prebuild_host_tools()
-        run(*self._make_args("all"), cwd=repo_root(), docker=self.docker)
+        else:
+            self._prebuild_host_tools()
+            run(*self._make_args("all"), cwd=repo_root(), docker=self.docker)
+        # Stage into test_out() for the windows-test upload glob.
+        test_out().mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repo_root() / "sqlite3.elf", test_out() / "sqlite3.elf")
 
     # ------------------------------------------------------------------
     # Windows: single-shot Docker build
@@ -436,7 +440,8 @@ class SqliteBuild(ZScript):
 
         test_allowlist = {"sqlite3.elf"}
         test_binaries: list[Path] = []
-        for candidate in [repo_root(), repo_root() / "build"]:
+        # test_out() is the windows-test artifact overlay.
+        for candidate in [test_out(), repo_root(), repo_root() / "build"]:
             if candidate.is_dir():
                 elfs = sorted(candidate.glob("*.elf"))
                 found = [b for b in elfs if b.name in test_allowlist]
@@ -468,10 +473,10 @@ class SqliteBuild(ZScript):
             repo_elf = repo_root() / binary.name
             copied_elf = False
             if binary.resolve() != repo_elf.resolve():
-                if repo_elf.exists():
-                    raise FileExistsError(f"refusing to clobber existing {repo_elf}")
+                # Preserve a pre-existing repo-root ELF on cleanup.
+                preexisted = repo_elf.exists()
                 shutil.copy2(binary, repo_elf)
-                copied_elf = True
+                copied_elf = not preexisted
             initrd: Path | None = None
             try:
                 initrd = make_initrd(self, binary.name, test=True)
