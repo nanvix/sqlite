@@ -175,8 +175,8 @@ class SqliteBuild(ZScript):
 
     # Build artifacts to copy back from the container to the host after
     # the Windows single-shot build completes.  Two categories:
-    #   * legacy repo-root paths needed at runtime (sqlite3.elf is
-    #     resolved by make_initrd via repo_root()/app);
+    #   * legacy repo-root paths needed at runtime (sqlite3.elf is read
+    #     from repo_root() by the standalone test callsite below);
     #   * install-staged paths under .nanvix/out/release/{lib,include,bin}
     #     required by `./z release` (see _staged_output_files()).
     _WINDOWS_OUTPUT_FILES = [
@@ -364,7 +364,7 @@ class SqliteBuild(ZScript):
         print("  Running sqlite3.elf via nanvixd standalone...")
 
         # Bundle sqlite3.elf + daemons into an initrd.
-        initrd = make_initrd(self, "sqlite3.elf", test=True)
+        initrd = make_initrd(self, repo_root() / "sqlite3.elf", test_out())
 
         sql_file = repo_root() / ".nanvix" / "functional_test.sql"
 
@@ -468,18 +468,9 @@ class SqliteBuild(ZScript):
         for binary in test_binaries:
             name = binary.stem
             print(f"RUN  {name}...")
-            # make_initrd resolves binaries relative to repo_root;
-            # copy the ELF there temporarily unless it already lives there.
-            repo_elf = repo_root() / binary.name
-            copied_elf = False
-            if binary.resolve() != repo_elf.resolve():
-                # Preserve a pre-existing repo-root ELF on cleanup.
-                preexisted = repo_elf.exists()
-                shutil.copy2(binary, repo_elf)
-                copied_elf = not preexisted
             initrd: Path | None = None
             try:
-                initrd = make_initrd(self, binary.name, test=True)
+                initrd = make_initrd(self, binary, test_out())
                 with tempfile.TemporaryDirectory(
                     prefix=f"nanvix_{name}_",
                     ignore_cleanup_errors=True,
@@ -522,8 +513,6 @@ class SqliteBuild(ZScript):
             finally:
                 if initrd is not None and initrd.exists():
                     initrd.unlink()
-                if copied_elf and repo_elf.exists():
-                    repo_elf.unlink()
 
         if failed:
             msg = f"{len(failed)} test(s) failed: {' '.join(failed)}"
