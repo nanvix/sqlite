@@ -48,14 +48,14 @@ docker pull ghcr.io/nanvix/toolchain-gcc:sha-34a3641
 
 # 2. Download Nanvix sysroot and extract Nanvix commit SHA
 curl -fsSL https://raw.githubusercontent.com/nanvix/nanvix/refs/heads/dev/scripts/get-nanvix.sh | bash -s -- nanvix-artifacts
-tar -xjf nanvix-artifacts/*microvm*single*.tar.bz2 -C nanvix-artifacts
+tar -xjf nanvix-artifacts/*microvm*standalone*.tar.bz2 -C nanvix-artifacts
 export NANVIX_HOME=$(find nanvix-artifacts -maxdepth 2 -type d -name "bin" -exec dirname {} \; | head -1)
 # Extract Nanvix SHA from artifact filename for version matching
-export NANVIX_SHA=$(ls nanvix-artifacts/*microvm*single*.tar.bz2 | sed -E 's/.*-([a-f0-9]{40})\.tar\.bz2$/\1/')
+export NANVIX_SHA=$(ls nanvix-artifacts/*microvm*standalone*.tar.bz2 | sed -E 's/.*-([a-f0-9]{40})\.tar\.bz2$/\1/')
 
 # 3. Download zlib dependency (must match Nanvix version)
 # Find zlib release built with same Nanvix SHA, or use latest as fallback
-curl -fsSL -o zlib-release.tar.bz2 "https://github.com/nanvix/zlib/releases/latest/download/zlib-microvm-single-process.tar.bz2"
+curl -fsSL -o zlib-release.tar.bz2 "https://github.com/nanvix/zlib/releases/latest/download/zlib-microvm-standalone.tar.bz2"
 tar -xjf zlib-release.tar.bz2
 cp -f zlib-*/lib/libz.a "$NANVIX_HOME/lib/"
 cp -f zlib-*/include/*.h "$NANVIX_HOME/include/"
@@ -88,13 +88,9 @@ You need the following components to build SQLite for Nanvix:
 | Platform | Process Mode | Linux | Windows | Artifact Pattern |
 |----------|--------------|-------|---------|------------------|
 | hyperlight | standalone | ✅ | ✅ | `hyperlight.*standalone` |
-| hyperlight | single-process | ✅ | ❌ | `hyperlight.*single-process` |
-| hyperlight | multi-process | ✅ | ❌ | `hyperlight.*multi-process` |
 | microvm | standalone | ✅ | ✅ | `microvm.*standalone` |
-| microvm | single-process | ✅ | ❌ | `microvm.*single-process` |
-| microvm | multi-process | ✅ | ❌ | `microvm.*multi-process` |
 
-> **Note:** Single-process and multi-process modes require `linuxd` and are only supported on Linux. Windows testing is limited to standalone mode, where `nanvixd.exe` runs the guest binary directly.
+> **Note:** Only standalone mode is supported. In standalone mode, `nanvixd` runs the guest binary directly on both Linux and Windows.
 
 ### Downloading Nanvix
 
@@ -106,20 +102,20 @@ The script downloads all release artifacts. Extract the one matching your target
 
 ### Downloading zlib Dependency
 
-SQLite requires zlib for compression support. **You must use a zlib release that was built against the same Nanvix version.** The Nanvix commit SHA is embedded in the artifact filename (e.g., `nanvix-microvm-single-process-release-<SHA>.tar.bz2`).
+SQLite requires zlib for compression support. **You must use a zlib release that was built against the same Nanvix version.** The Nanvix commit SHA is embedded in the artifact filename (e.g., `nanvix-microvm-standalone-release-<SHA>.tar.bz2`).
 
 To find matching zlib releases:
 
 ```bash
 # 1. Extract Nanvix SHA from artifact filename
-NANVIX_SHA=$(ls nanvix-artifacts/*microvm*single*.tar.bz2 | sed -E 's/.*-([a-f0-9]{40})\.tar\.bz2$/\1/')
+NANVIX_SHA=$(ls nanvix-artifacts/*microvm*standalone*.tar.bz2 | sed -E 's/.*-([a-f0-9]{40})\.tar\.bz2$/\1/')
 
 # 2. Check zlib releases for one built with matching Nanvix SHA
 # The zlib release notes contain the Nanvix commit SHA they were built against
 
-# 3. Download matching zlib (replace PLATFORM and PROCESS_MODE)
+# 3. Download matching zlib (replace PLATFORM)
 curl -fsSL -o zlib-release.tar.bz2 \
-  "https://github.com/nanvix/zlib/releases/latest/download/zlib-PLATFORM-PROCESS_MODE.tar.bz2"
+  "https://github.com/nanvix/zlib/releases/latest/download/zlib-PLATFORM-standalone.tar.bz2"
 tar -xjf zlib-release.tar.bz2
 cp -f zlib-*/lib/libz.a "$NANVIX_HOME/lib/"
 cp -f zlib-*/include/*.h "$NANVIX_HOME/include/"
@@ -260,16 +256,12 @@ The GitHub Actions workflow at `.github/workflows/nanvix-ci.yml` automates build
 
 ### Build Matrix
 
-The CI runs on all platform × process-mode × memory combinations:
+The CI runs on all platform × memory combinations:
 
 | Platform | Process Mode | Memory | OS |
 |----------|--------------|--------|----|
 | hyperlight | standalone | 128mb, 256mb | Linux + Windows |
-| hyperlight | single-process | 128mb, 256mb | Linux |
-| hyperlight | multi-process | 128mb, 256mb | Linux |
 | microvm | standalone | 128mb, 256mb | Linux + Windows |
-| microvm | single-process | 128mb, 256mb | Linux |
-| microvm | multi-process | 128mb, 256mb | Linux |
 
 All Linux configurations run functional tests in parallel with `fail-fast: false`, ensuring that all platforms are tested even if one fails. Windows standalone tests use `nanvixd.exe` to run `sqlite3.elf` with functional SQL queries.
 

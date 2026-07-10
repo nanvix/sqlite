@@ -145,18 +145,10 @@ install: build
 # --- Functional tests: run SQL queries on nanvixd$(EXE) ---
 test-functional:
 	@echo "=== SQLite functional tests ==="
-	@cp .nanvix/functional_test.sql _sqlite_test.sql
-ifeq ($(PROCESS_MODE),standalone)
 	@echo "  NOTE: Standalone functional tests are handled via ./z.sh."
 	@echo "  Delegating to: ./z.sh test test-functional"
 	@PLATFORM="$(PLATFORM)" PROCESS_MODE="$(PROCESS_MODE)" MEMORY_SIZE="$(MEMORY_SIZE)" \
 		./z.sh --with-nanvix "$(NANVIX_HOME)" test test-functional
-else
-	@echo "  Running sqlite3$(EXE) via nanvixd$(EXE)..."
-	cd "$(SYSROOT_PATH)" && timeout --foreground 120 ./bin/nanvixd$(EXE) -- $(abspath sqlite3$(EXE)) < $(abspath _sqlite_test.sql)
-	@echo "  PASS: sqlite3 (exit code 0)"
-endif
-	@rm -f _sqlite_test.sql
 	@echo "  PASS: SQLite functional tests"
 
 # --- Run all test levels ---
@@ -168,7 +160,7 @@ test: test-functional
 # ===========================================================================
 clean:
 	-make clean 2>/dev/null || true
-	rm -f $(CONFIGURED_MARKER) sqlite3$(EXE) _sqlite_test.sql jimsh0 lemon mksourceid mkkeywordhash srcck1 src-verify lempar.c
+	rm -f $(CONFIGURED_MARKER) sqlite3$(EXE) jimsh0 lemon mksourceid mkkeywordhash srcck1 src-verify lempar.c
 	rm -rf $(OUT_DIR) dist/
 
 distclean: clean

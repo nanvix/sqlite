@@ -320,26 +320,22 @@ class SqliteBuild(ZScript):
     def test(self) -> None:
         """Run the test suite.
 
-        Only functional tests are supported. In standalone mode the
-        functional test is handled in Python via make_initrd so that
-        initrd creation is shared across platforms.
+        Only functional tests are supported. The functional test is
+        handled in Python via make_initrd so that initrd creation is
+        shared across platforms.
         """
         if IS_WINDOWS:
             self._run_tests_windows()
             return
 
-        if self.config.deployment_mode == "standalone":
-            allowed = {"test", "test-functional"}
-            unknown = [t for t in self.targets if t not in allowed]
-            if unknown:
-                log.fatal(
-                    f"Unsupported test target(s) in standalone mode: {unknown}. "
-                    f"Allowed: {sorted(allowed)}.",
-                )
-            self._run_functional_standalone()
-        else:
-            targets = self.targets or ["test"]
-            run(*self._make_args(*targets), cwd=repo_root())
+        allowed = {"test", "test-functional"}
+        unknown = [t for t in self.targets if t not in allowed]
+        if unknown:
+            log.fatal(
+                f"Unsupported test target(s): {unknown}. "
+                f"Allowed: {sorted(allowed)}.",
+            )
+        self._run_functional_standalone()
 
     def _run_functional_standalone(self) -> None:
         """Run standalone functional tests using make_initrd.
@@ -403,18 +399,11 @@ class SqliteBuild(ZScript):
     def _run_tests_windows(self) -> None:
         """Run tests natively on Windows using nanvixd.exe.
 
-        Only standalone mode is tested on Windows; multi-process and
-        single-process require linuxd, which is Linux-only. Uses
-        make_initrd to bundle the binary with system daemons, and a
-        ramfs providing /tmp for any test I/O.
+        Only standalone mode is supported, so the guest binary is run
+        directly by nanvixd.exe. Uses make_initrd to bundle the binary
+        with system daemons, and a ramfs providing /tmp for any test
+        I/O.
         """
-        if self.config.deployment_mode != "standalone":
-            log.info(
-                f"Skipping tests on Windows for mode"
-                f" '{self.config.deployment_mode}' (requires linuxd).",
-            )
-            return
-
         sysroot = self.config.get(CFG_SYSROOT, "")
         if not sysroot:
             log.fatal(
