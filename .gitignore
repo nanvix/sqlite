@@ -5,6 +5,7 @@
 .nanvix/buildroot/
 .nanvix/env.json
 .nanvix/nanvix.lock
+.nanvix-configured
 nanvix-artifacts/
 
 # SQLite build artifacts
@@ -47,6 +48,7 @@ jimsh0
 lemon
 mkkeywordhash
 mksourceid
+srcck1
 src-verify
 
 # Temp directories
