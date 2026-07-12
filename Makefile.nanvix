@@ -2,7 +2,8 @@
 # Licensed under the MIT License.
 #
 # Usage: make -f Makefile.nanvix PLATFORM=<platform> PROCESS_MODE=<mode> \
-#    MEMORY_SIZE=<size> NANVIX_HOME=<home> NANVIX_TOOLCHAIN=<toolchain> [target]
+#    MEMORY_SIZE=<size> NANVIX_HOME=<home> NANVIX_TOOLCHAIN=<sdk> \
+#    BUILDROOT=<buildroot> [target]
 #
 # Targets:
 #   all: Build SQLite library and CLI, then stage via install
@@ -33,6 +34,7 @@ _REQUIRED := PLATFORM \
     MEMORY_SIZE \
     NANVIX_HOME \
     NANVIX_TOOLCHAIN \
+    BUILDROOT \
     NANVIX_ROOT \
     OUT_DIR \
     DIST_DIR \
@@ -67,39 +69,33 @@ ifneq ($(_BUILD),)
     $(error Cannot mix build and non-build targets. Build targets: $(_NANVIX_DOCKER_BUILD_GOALS))
   endif
 
-  ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc),)
-      $(error Nanvix toolchain not found at $(NANVIX_TOOLCHAIN))
+  ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/nanvix-sdk.json),)
+      $(error Nanvix SDK not found at $(NANVIX_TOOLCHAIN))
+  endif
+  ifeq ($(wildcard $(NANVIX_TOOLCHAIN)/bin/clang),)
+      $(error Nanvix SDK Clang not found at $(NANVIX_TOOLCHAIN)/bin/clang)
   endif
 endif
 
 TOOLCHAIN_PREFIX := $(NANVIX_TOOLCHAIN)
-SYSROOT_PREFIX := $(SYSROOT_PATH)
-LIBC := $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libc.a
-LIBM := $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libm.a
-LIBPOSIX := $(SYSROOT_PATH)/lib/libposix.a
-LIBZ := $(SYSROOT_PATH)/lib/libz.a
-# Since Nanvix 0.16.19, process startup (`_start`) and `__nanvix_main` live in
-# libnvx_crt0.a, which drives `__nanvix_libc_start_main` in libposix.a. It must
-# be linked first so its strong symbols win over the toolchain's weak stubs
-# (otherwise the link fails with an undefined reference to `__nanvix_main`).
-# libnvx_crt0.a and libposix.a share some kcall objects, so allow multiple
-# definitions to resolve the overlap.
-LIBCRT0 := $(SYSROOT_PATH)/lib/libnvx_crt0.a
+BUILDROOT_PATH := $(abspath $(BUILDROOT))
 
 CONFIGURE_ENV = \
-AR="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-ar" \
-AS="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-as" \
-CC="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-gcc" \
-CXX="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-g++" \
-CPP="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-cpp" \
-LD="$(TOOLCHAIN_PREFIX)/bin/i686-nanvix-ld" \
-CFLAGS="-I$(SYSROOT_PREFIX)/include -DSQLITE_OMIT_WAL=1" \
-LDFLAGS="-static -T$(SYSROOT_PREFIX)/lib/user.ld -L$(SYSROOT_PREFIX)/lib -Wl,--allow-multiple-definition -Wl,--start-group $(LIBCRT0) $(LIBPOSIX) $(LIBC) $(LIBM) $(LIBZ) -Wl,--end-group" \
-LIBS="-Wl,--start-group $(LIBCRT0) $(LIBPOSIX) $(LIBC) $(LIBM) $(LIBZ) -Wl,--end-group"
+AR="$(TOOLCHAIN_PREFIX)/bin/llvm-ar" \
+AS="$(TOOLCHAIN_PREFIX)/bin/clang" \
+CC="$(TOOLCHAIN_PREFIX)/bin/clang" \
+CXX="$(TOOLCHAIN_PREFIX)/bin/clang++" \
+CPP="$(TOOLCHAIN_PREFIX)/bin/clang-cpp" \
+LD="$(TOOLCHAIN_PREFIX)/bin/clang" \
+RANLIB="$(TOOLCHAIN_PREFIX)/bin/llvm-ranlib" \
+NM="$(TOOLCHAIN_PREFIX)/bin/llvm-nm" \
+STRIP="$(TOOLCHAIN_PREFIX)/bin/llvm-strip" \
+CFLAGS="-I$(BUILDROOT_PATH)/include -DSQLITE_OMIT_WAL=1" \
+LDFLAGS="-L$(BUILDROOT_PATH)/lib -Wl,-z,noexecstack" \
+LIBS="-lz"
 
 CONFIGURE_OPTS = \
 --disable-shared \
---sysroot="$(SYSROOT_PREFIX)" \
 --prefix="$(INSTALL_PREFIX)" \
 --host=i686-nanvix \
 --disable-tcl \

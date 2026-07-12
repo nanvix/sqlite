@@ -42,9 +42,16 @@ from nanvix_zutil.paths import (
 
 IS_WINDOWS = sys.platform == "win32"
 
+#: Docker image for cross-compiling Nanvix targets.
+NANVIX_DOCKER_IMAGE = (
+    "ghcr.io/nanvix/nanvix-sdk-c-clang"
+    "@sha256:f61737cb0780e6a2058c6d0bdf8ae5562db18de437173b2bcbbe6973abd3689f"
+)
+
 # Makefile variable names (build-system-specific).
 _MAKE_VAR_HOME = "NANVIX_HOME"
 _MAKE_VAR_TOOLCHAIN = "NANVIX_TOOLCHAIN"
+_MAKE_VAR_BUILDROOT = "BUILDROOT"
 _MAKE_VAR_PLATFORM = "PLATFORM"
 _MAKE_VAR_PROCESS_MODE = "PROCESS_MODE"
 _MAKE_VAR_MEMORY_SIZE = "MEMORY_SIZE"
@@ -57,6 +64,23 @@ _DEFAULT_INSTALL_PREFIX = "/sysroot"
 
 class SqliteBuild(ZScript):
     """Build script for nanvix/sqlite."""
+
+    # Build-time headers, libraries, startup objects, and linker scripts come
+    # from the SDK and buildroot. The downloaded sysroot runs tests only.
+    SYSROOT_REQUIRED_FILES = (
+        "bin/nanvixd.elf",
+        "bin/kernel.elf",
+        "bin/mkramfs.elf",
+    )
+    SYSROOT_REQUIRED_FILES_WINDOWS = (
+        "bin/nanvixd.exe",
+        "bin/kernel.elf",
+        "bin/mkramfs.exe",
+    )
+
+    def docker_image(self) -> str:
+        """Return the default Docker image for cross-compilation."""
+        return NANVIX_DOCKER_IMAGE
 
     def _make_args(
         self,
@@ -90,6 +114,7 @@ class SqliteBuild(ZScript):
             "Makefile.nanvix",
             f"{_MAKE_VAR_HOME}={sysroot_p}",
             f"{_MAKE_VAR_TOOLCHAIN}={toolchain_p}",
+            f"{_MAKE_VAR_BUILDROOT}={translate(buildroot())}",
         ]
 
         args.extend(
@@ -113,37 +138,6 @@ class SqliteBuild(ZScript):
 
         args.extend(targets)
         return args
-
-    def setup(self) -> bool:
-        """Download the Nanvix sysroot and dependencies.
-
-        After the base setup installs dependencies into the buildroot,
-        merge buildroot libraries and headers into the sysroot so the
-        existing Makefile.nanvix can find them at its expected paths.
-        """
-        failed = super().setup()
-        # Merge buildroot libraries and headers into the sysroot so the
-        # existing Makefile.nanvix can find them at its expected paths.
-        sysroot = Path(self.config.get(CFG_SYSROOT, ""))
-        for subdir in ("lib", "include"):
-            src = buildroot() / subdir
-            dst = sysroot / subdir
-            if not src.is_dir():
-                continue
-            dst.mkdir(parents=True, exist_ok=True)
-            for item in src.iterdir():
-                target = dst / item.name
-                if item.is_dir():
-                    shutil.copytree(item, target, dirs_exist_ok=True)
-                    log.info(
-                        f"Merged directory {subdir}/{item.name} into sysroot",
-                    )
-                elif not target.exists():
-                    shutil.copy2(item, target)
-                    log.info(
-                        f"Merged {subdir}/{item.name} into sysroot",
-                    )
-        return failed
 
     def build(self) -> None:
         """Cross-compile libsqlite3.a and sqlite3.elf for Nanvix.
@@ -198,9 +192,8 @@ class SqliteBuild(ZScript):
     def _build_windows(self) -> None:
         """Run the full build pipeline inside a single Docker invocation.
 
-        The ``toolchain-gcc`` image is cross-only (no native ``cc``), so
-        we apt-install ``gcc``/``make`` once per build before running the
-        host-tool and cross-compile phases.
+        The SDK's native ``cc`` builds host generators, while SDK Clang builds
+        the Nanvix target artifacts.
         """
         if self.docker is None:
             log.fatal(
@@ -222,16 +215,10 @@ class SqliteBuild(ZScript):
         configure_cmd = shlex.join(self._make_args("configure"))
         all_cmd = shlex.join(self._make_args("all"))
 
-        # Single shell script: install native gcc, build jimsh0, configure,
-        # build host tools using the autoconf-generated Makefile, then
-        # cross-compile via Makefile.nanvix.
+        # One shell preserves generated files across the Windows tar-copy
+        # build while host generators and target artifacts are compiled.
         script = (
             "set -e; "
-            "if ! command -v cc >/dev/null 2>&1; then "
-            "  apt-get update >/dev/null && "
-            "  DEBIAN_FRONTEND=noninteractive apt-get install -y "
-            "    --no-install-recommends gcc libc6-dev make >/dev/null; "
-            "fi; "
             "if [ ! -x ./jimsh0 ]; then "
             f"  cc -o jimsh0 {jimsh0_cflags} autosetup/jimsh0.c; "
             "fi; "
@@ -257,44 +244,30 @@ class SqliteBuild(ZScript):
     def _prebuild_host_tools(self) -> None:
         """Build host-side tools needed by autosetup and the Makefile.
 
-        Linux/CI path: the official ``toolchain-gcc`` Docker image is
-        cross-only (ships ``i686-nanvix-gcc`` but no native ``cc``), so
-        any phase that needs a host compiler must run on the runner
-        outside the container.  Only Phase 2 (``./configure``) and the
-        final cross-compile run inside Docker.
-
-        Phase 1 -- jimsh0 (TCL bootstrap for ``./configure``) -- host cc.
-        Phase 2 -- ``make configure`` inside Docker (generates Makefile).
-        Phase 3 -- lemon, mkkeywordhash, mksourceid, srcck1, src-verify
-                   compiled on the host using the generated Makefile.
-
-        TODO(toolchain-gcc): if/when the image grows a native ``gcc``,
-        Phases 1 and 3 can move back into Docker and this whole helper
-        collapses to the cross-build call.
+        The SDK's native compiler builds jimsh0 and SQLite's generators.
+        Target compilation remains isolated to SDK Clang.
         """
         root = repo_root()
 
-        # Phase 1: build jimsh0 on the host.
+        # Phase 1: build jimsh0 for the build host.
         jimsh0 = root / "jimsh0"
         if not jimsh0.is_file():
-            log.info("Pre-building jimsh0 on the host...")
-            subprocess.run(  # noqa: S603
-                [
-                    "cc",
-                    "-o",
-                    str(jimsh0),
-                    *self._JIMSH0_CFLAGS,
-                    str(root / "autosetup" / "jimsh0.c"),
-                ],
-                check=True,
+            log.info("Pre-building jimsh0 with the SDK host compiler...")
+            run(
+                "cc",
+                "-o",
+                "jimsh0",
+                *self._JIMSH0_CFLAGS,
+                "autosetup/jimsh0.c",
                 cwd=root,
+                docker=self.docker,
             )
 
         # Phase 2: run configure inside Docker.
         log.info("Running configure inside Docker...")
         run(*self._make_args("configure"), cwd=root, docker=self.docker)
 
-        # Phase 3: build remaining host tools on the host.
+        # Phase 3: build remaining host tools for the build host.
         host_tools = [
             "lemon",
             "mksourceid",
@@ -304,17 +277,15 @@ class SqliteBuild(ZScript):
         ]
         missing = [t for t in host_tools if not (root / t).is_file()]
         if missing:
-            log.info(f"Pre-building host tools on the host: {missing}")
-            subprocess.run(  # noqa: S603
-                [
-                    "make",
-                    *missing,
-                    "B.cc=cc",
-                    "B.tclsh=./jimsh0",
-                    f"TOP={root}",
-                ],
-                check=True,
+            log.info(f"Pre-building host tools with the SDK host compiler: {missing}")
+            run(
+                "make",
+                *missing,
+                "B.cc=cc",
+                "B.tclsh=./jimsh0",
+                "TOP=.",
                 cwd=root,
+                docker=self.docker,
             )
 
     def test(self) -> None:

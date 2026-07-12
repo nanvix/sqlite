@@ -43,28 +43,13 @@ This document describes the port of [SQLite](https://sqlite.org/) database engin
 For experienced users who want to build quickly:
 
 ```bash
-# 1. Pull the Docker image
-docker pull ghcr.io/nanvix/toolchain-gcc:sha-34a3641
-
-# 2. Download Nanvix sysroot and extract Nanvix commit SHA
-curl -fsSL https://raw.githubusercontent.com/nanvix/nanvix/refs/heads/dev/scripts/get-nanvix.sh | bash -s -- nanvix-artifacts
-tar -xjf nanvix-artifacts/*microvm*standalone*.tar.bz2 -C nanvix-artifacts
-export NANVIX_HOME=$(find nanvix-artifacts -maxdepth 2 -type d -name "bin" -exec dirname {} \; | head -1)
-# Extract Nanvix SHA from artifact filename for version matching
-export NANVIX_SHA=$(ls nanvix-artifacts/*microvm*standalone*.tar.bz2 | sed -E 's/.*-([a-f0-9]{40})\.tar\.bz2$/\1/')
-
-# 3. Download zlib dependency (must match Nanvix version)
-# Find zlib release built with same Nanvix SHA, or use latest as fallback
-curl -fsSL -o zlib-release.tar.bz2 "https://github.com/nanvix/zlib/releases/latest/download/zlib-microvm-standalone.tar.bz2"
-tar -xjf zlib-release.tar.bz2
-cp -f zlib-*/lib/libz.a "$NANVIX_HOME/lib/"
-cp -f zlib-*/include/*.h "$NANVIX_HOME/include/"
-
-# 4. Build (Docker is used automatically if native toolchain is not found)
-make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME="$NANVIX_HOME"
-
-# 5. Run tests
-make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME="$NANVIX_HOME" test
+SDK=ghcr.io/nanvix/nanvix-sdk-c-clang@sha256:f61737cb0780e6a2058c6d0bdf8ae5562db18de437173b2bcbbe6973abd3689f
+NANVIX_MACHINE=microvm \
+NANVIX_DEPLOYMENT_MODE=standalone \
+NANVIX_MEMORY_SIZE=256mb \
+  ./z setup --with-docker "$SDK"
+./z build
+./z test
 ```
 
 Continue reading for detailed instructions.
@@ -77,83 +62,41 @@ You need the following components to build SQLite for Nanvix:
 
 | Component | Description | Default Location |
 |-----------|-------------|------------------|
-| **Nanvix Toolchain** | i686-nanvix cross-compiler | `$HOME/toolchain` |
-| **Nanvix Sysroot** | System libraries and linker script | `$HOME/nanvix` |
-| **zlib** | Compression library (must match Nanvix version) | Installed in sysroot |
+| **Nanvix SDK** | Clang/LLVM C SDK v0.20.0-sdk.1 | Docker image |
+| **Nanvix runtime** | Nanvix 0.20.0 binaries used by tests | `.nanvix/sysroot` |
+| **zlib** | SDK-built release 1.3.1-nanvix-0.20.0 | `.nanvix/buildroot` |
 
-> **Important:** The zlib library must be built against the same Nanvix version you are using. The CI workflow automatically finds and downloads matching zlib releases based on the Nanvix commit SHA.
+`./z setup` downloads the runtime and matching zlib release. Build-time system
+headers, libraries, startup objects, and linker configuration are supplied by
+the SDK; the downloaded runtime sysroot is not used for compilation.
 
 ### Available Platform Configurations
 
 | Platform | Process Mode | Linux | Windows | Artifact Pattern |
 |----------|--------------|-------|---------|------------------|
-| hyperlight | standalone | ✅ | ✅ | `hyperlight.*standalone` |
 | microvm | standalone | ✅ | ✅ | `microvm.*standalone` |
 
-> **Note:** Only standalone mode is supported. In standalone mode, `nanvixd` runs the guest binary directly on both Linux and Windows.
-
-### Downloading Nanvix
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/nanvix/nanvix/refs/heads/dev/scripts/get-nanvix.sh | bash -s -- nanvix-artifacts
-```
-
-The script downloads all release artifacts. Extract the one matching your target platform (see [Quick Start](#quick-start) for a complete example).
-
-### Downloading zlib Dependency
-
-SQLite requires zlib for compression support. **You must use a zlib release that was built against the same Nanvix version.** The Nanvix commit SHA is embedded in the artifact filename (e.g., `nanvix-microvm-standalone-release-<SHA>.tar.bz2`).
-
-To find matching zlib releases:
-
-```bash
-# 1. Extract Nanvix SHA from artifact filename
-NANVIX_SHA=$(ls nanvix-artifacts/*microvm*standalone*.tar.bz2 | sed -E 's/.*-([a-f0-9]{40})\.tar\.bz2$/\1/')
-
-# 2. Check zlib releases for one built with matching Nanvix SHA
-# The zlib release notes contain the Nanvix commit SHA they were built against
-
-# 3. Download matching zlib (replace PLATFORM)
-curl -fsSL -o zlib-release.tar.bz2 \
-  "https://github.com/nanvix/zlib/releases/latest/download/zlib-PLATFORM-standalone.tar.bz2"
-tar -xjf zlib-release.tar.bz2
-cp -f zlib-*/lib/libz.a "$NANVIX_HOME/lib/"
-cp -f zlib-*/include/*.h "$NANVIX_HOME/include/"
-```
-
-> **Note:** The CI workflow automatically finds and downloads zlib releases that match the Nanvix version by checking release notes for the Nanvix commit SHA.
+> **Note:** Nanvix 0.20.0 publishes only the microvm 256 MiB runtime used by
+> this port; no Hyperlight runtime artifacts are available. Only standalone
+> mode is supported here, with `nanvixd` running the guest on Linux and Windows.
 
 ---
 
 ## Building
 
-### Using Docker (Recommended)
+### Using Docker
 
-The Makefile supports automatic Docker fallback when the native toolchain is not available:
-
-```bash
-# Pull the Nanvix toolchain Docker image
-docker pull ghcr.io/nanvix/toolchain-gcc:sha-34a3641
-
-# Build (Docker is used automatically if native toolchain is not found)
-make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME=/path/to/nanvix/sysroot-debug
-```
-
-> **Note:** The sysroot (`NANVIX_HOME`) must contain `lib/libposix.a`, `lib/libz.a`, and `lib/user.ld` from a Nanvix build.
-
-**Docker Fallback Behavior:**
-- If `NANVIX_TOOLCHAIN` points to a valid toolchain, it uses the native compiler
-- If the native toolchain is not found, it automatically uses Docker if available
-- Use `CONFIG_NANVIX_DOCKER=y` to force Docker usage even when native toolchain exists
-- Use `NANVIX_DOCKER_IMAGE` to specify a custom Docker image (default: `ghcr.io/nanvix/toolchain-gcc:sha-34a3641`)
-
-### Using Native Toolchain
+The pinned SDK contains Clang, LLVM binutils, and the Nanvix target sysroot:
 
 ```bash
-export NANVIX_TOOLCHAIN=/path/to/toolchain  # Contains: bin/i686-nanvix-gcc
-export NANVIX_HOME=/path/to/nanvix          # Contains: lib/user.ld, lib/libposix.a, lib/libz.a
-make -f Makefile.nanvix CONFIG_NANVIX=y all
+SDK=ghcr.io/nanvix/nanvix-sdk-c-clang@sha256:f61737cb0780e6a2058c6d0bdf8ae5562db18de437173b2bcbbe6973abd3689f
+./z setup --with-docker "$SDK"
+./z build
 ```
+
+Native `gcc` remains responsible only for build-machine generators such as
+`jimsh0` and `lemon`. Target objects are compiled with SDK Clang, static
+archives use LLVM tools, and executables are linked through Clang.
 
 ### Build Outputs
 
@@ -174,7 +117,7 @@ After a successful build, you will have:
 
 ```bash
 # Run all tests
-make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME=/path/to/nanvix test
+./z test
 ```
 
 ### Running Individual Tests
@@ -202,10 +145,10 @@ The following changes were made to support Nanvix.
 | Change | Description |
 |--------|-------------|
 | New Makefile | Added `Makefile.nanvix` for Nanvix cross-compilation |
-| Cross-compilation | Uses `CONFIG_NANVIX=y` option to enable Nanvix build |
-| Docker support | Automatic Docker fallback when native toolchain not available |
+| Cross-compilation | Uses the pinned Nanvix Clang/LLVM SDK |
+| Dependency isolation | Reads zlib from `.nanvix/buildroot` |
 | Configure wrapper | Wraps standard `./configure` with Nanvix cross-compilation settings |
-| Linker flags | Added Nanvix-specific flags (`-T user.ld -static`) |
+| Linking | Uses the Clang driver and SDK-provided defaults |
 | Shared libraries | Disabled (not supported on Nanvix) |
 | Test target | Modified to run via `nanvixd.elf` |
 
@@ -256,12 +199,12 @@ The GitHub Actions workflow at `.github/workflows/nanvix-ci.yml` automates build
 
 ### Build Matrix
 
-The CI runs on all platform × memory combinations:
+Nanvix 0.20.0 publishes only microvm runtime assets at 256 MiB; it has no
+Hyperlight assets. The active CI and package matrix is:
 
 | Platform | Process Mode | Memory | OS |
 |----------|--------------|--------|----|
-| hyperlight | standalone | 128mb, 256mb | Linux + Windows |
-| microvm | standalone | 128mb, 256mb | Linux + Windows |
+| microvm | standalone | 256mb | Linux + Windows |
 
 All Linux configurations run functional tests in parallel with `fail-fast: false`, ensuring that all platforms are tested even if one fails. Windows standalone tests use `nanvixd.exe` to run `sqlite3.elf` with functional SQL queries.
 
