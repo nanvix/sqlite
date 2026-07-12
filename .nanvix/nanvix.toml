@@ -1,13 +1,13 @@
 [package]
 name = "sqlite"
 version = "3.49.0"
-nanvix-version = "0.17.84"
+nanvix-version = "0.20.0"
 
 [builds]
 [builds.matrix]
-platforms = ["hyperlight", "microvm"]
+platforms = ["microvm"]
 modes = ["standalone"]
-memory = ["128mb", "256mb"]
+memory = ["256mb"]
 
 [dependencies]
 zlib = "1.3.1"
