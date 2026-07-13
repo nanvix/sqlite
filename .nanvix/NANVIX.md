@@ -43,11 +43,10 @@ This document describes the port of [SQLite](https://sqlite.org/) database engin
 For experienced users who want to build quickly:
 
 ```bash
-SDK=ghcr.io/nanvix/nanvix-sdk-c-clang@sha256:f61737cb0780e6a2058c6d0bdf8ae5562db18de437173b2bcbbe6973abd3689f
 NANVIX_MACHINE=microvm \
 NANVIX_DEPLOYMENT_MODE=standalone \
 NANVIX_MEMORY_SIZE=256mb \
-  ./z setup --with-docker "$SDK"
+  ./z setup
 ./z build
 ./z test
 ```
@@ -62,7 +61,7 @@ You need the following components to build SQLite for Nanvix:
 
 | Component | Description | Default Location |
 |-----------|-------------|------------------|
-| **Nanvix SDK** | Clang/LLVM C SDK v0.20.0-sdk.1 | Docker image |
+| **Nanvix SDK** | Canonical Clang/LLVM C SDK | `.nanvix/nanvix.toml` |
 | **Nanvix runtime** | Nanvix 0.20.0 binaries used by tests | `.nanvix/sysroot` |
 | **zlib** | SDK-built release 1.3.1-nanvix-0.20.0 | `.nanvix/buildroot` |
 
@@ -89,8 +88,7 @@ the SDK; the downloaded runtime sysroot is not used for compilation.
 The pinned SDK contains Clang, LLVM binutils, and the Nanvix target sysroot:
 
 ```bash
-SDK=ghcr.io/nanvix/nanvix-sdk-c-clang@sha256:f61737cb0780e6a2058c6d0bdf8ae5562db18de437173b2bcbbe6973abd3689f
-./z setup --with-docker "$SDK"
+./z setup
 ./z build
 ```
 
