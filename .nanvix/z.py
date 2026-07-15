@@ -29,13 +29,12 @@ from nanvix_zutil import (
     run,
 )
 from nanvix_zutil.paths import (
-    bin_out,
     buildroot,
+    dev_out,
     dist_dir,
-    include_out,
-    lib_out,
     nanvix_root,
     out_dir,
+    regular_out,
     repo_root,
     test_out,
 )
@@ -115,9 +114,9 @@ class SqliteBuild(ZScript):
                 f"NANVIX_ROOT={translate(nanvix_root())}",
                 f"OUT_DIR={translate(out_dir())}",
                 f"DIST_DIR={translate(dist_dir())}",
-                f"LIB_OUT={translate(lib_out())}",
-                f"INCLUDE_OUT={translate(include_out())}",
-                f"BIN_OUT={translate(bin_out())}",
+                f"LIB_OUT={translate(dev_out() / 'lib')}",
+                f"INCLUDE_OUT={translate(dev_out() / 'include')}",
+                f"BIN_OUT={translate(regular_out() / 'bin')}",
             ]
         )
 
@@ -173,10 +172,10 @@ class SqliteBuild(ZScript):
         """
         root = repo_root()
         return [
-            str((lib_out() / "libsqlite3.a").relative_to(root)),
-            str((include_out() / "sqlite3.h").relative_to(root)),
-            str((include_out() / "sqlite3ext.h").relative_to(root)),
-            str((bin_out() / "sqlite3.elf").relative_to(root)),
+            str((dev_out() / "lib" / "libsqlite3.a").relative_to(root)),
+            str((dev_out() / "include" / "sqlite3.h").relative_to(root)),
+            str((dev_out() / "include" / "sqlite3ext.h").relative_to(root)),
+            str((regular_out() / "bin" / "sqlite3.elf").relative_to(root)),
         ]
 
     def _build_windows(self) -> None:
