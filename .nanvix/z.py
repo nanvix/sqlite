@@ -320,7 +320,7 @@ class SqliteBuild(ZScript):
         print("  Running sqlite3.elf via nanvixd standalone...")
 
         # Bundle sqlite3.elf + daemons into an initrd.
-        initrd = make_initrd(self, repo_root() / "sqlite3.elf", test_out())
+        initrd = make_initrd(repo_root() / "sqlite3.elf", test_out())
 
         sql_file = repo_root() / ".nanvix" / "functional_test.sql"
 
@@ -419,7 +419,7 @@ class SqliteBuild(ZScript):
             print(f"RUN  {name}...")
             initrd: Path | None = None
             try:
-                initrd = make_initrd(self, binary, test_out())
+                initrd = make_initrd(binary, test_out())
                 with tempfile.TemporaryDirectory(
                     prefix=f"nanvix_{name}_",
                     ignore_cleanup_errors=True,
