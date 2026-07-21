@@ -2,8 +2,7 @@
 # Licensed under the MIT License.
 #
 # Usage: make -f Makefile.nanvix PLATFORM=<platform> PROCESS_MODE=<mode> \
-#    MEMORY_SIZE=<size> NANVIX_HOME=<home> NANVIX_TOOLCHAIN=<sdk> \
-#    BUILDROOT=<buildroot> [target]
+#    MEMORY_SIZE=<size> NANVIX_HOME=<home> NANVIX_TOOLCHAIN=<sdk> [target]
 #
 # Targets:
 #   all: Build SQLite library and CLI, then stage via install
@@ -34,7 +33,6 @@ _REQUIRED := PLATFORM \
     MEMORY_SIZE \
     NANVIX_HOME \
     NANVIX_TOOLCHAIN \
-    BUILDROOT \
     NANVIX_ROOT \
     OUT_DIR \
     DIST_DIR \
@@ -78,7 +76,6 @@ ifneq ($(_BUILD),)
 endif
 
 TOOLCHAIN_PREFIX := $(NANVIX_TOOLCHAIN)
-BUILDROOT_PATH := $(abspath $(BUILDROOT))
 
 CONFIGURE_ENV = \
 AR="$(TOOLCHAIN_PREFIX)/bin/llvm-ar" \
@@ -90,8 +87,8 @@ LD="$(TOOLCHAIN_PREFIX)/bin/clang" \
 RANLIB="$(TOOLCHAIN_PREFIX)/bin/llvm-ranlib" \
 NM="$(TOOLCHAIN_PREFIX)/bin/llvm-nm" \
 STRIP="$(TOOLCHAIN_PREFIX)/bin/llvm-strip" \
-CFLAGS="-I$(BUILDROOT_PATH)/include -DSQLITE_OMIT_WAL=1" \
-LDFLAGS="-L$(BUILDROOT_PATH)/lib -Wl,-z,noexecstack" \
+CFLAGS="-I$(SYSROOT_PATH)/include -DSQLITE_OMIT_WAL=1" \
+LDFLAGS="-L$(SYSROOT_PATH)/lib -Wl,-z,noexecstack" \
 LIBS="-lz"
 
 CONFIGURE_OPTS = \

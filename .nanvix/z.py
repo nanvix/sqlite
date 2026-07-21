@@ -29,7 +29,6 @@ from nanvix_zutil import (
     run,
 )
 from nanvix_zutil.paths import (
-    buildroot,
     dev_out,
     dist_dir,
     nanvix_root,
@@ -44,7 +43,6 @@ IS_WINDOWS = sys.platform == "win32"
 # Makefile variable names (build-system-specific).
 _MAKE_VAR_HOME = "NANVIX_HOME"
 _MAKE_VAR_TOOLCHAIN = "NANVIX_TOOLCHAIN"
-_MAKE_VAR_BUILDROOT = "BUILDROOT"
 _MAKE_VAR_PLATFORM = "PLATFORM"
 _MAKE_VAR_PROCESS_MODE = "PROCESS_MODE"
 _MAKE_VAR_MEMORY_SIZE = "MEMORY_SIZE"
@@ -59,7 +57,7 @@ class SqliteBuild(ZScript):
     """Build script for nanvix/sqlite."""
 
     # Build-time headers, libraries, startup objects, and linker scripts come
-    # from the SDK and buildroot. The downloaded sysroot runs tests only.
+    # from the SDK and sysroot.
     SYSROOT_REQUIRED_FILES = (
         "bin/nanvixd.elf",
         "bin/kernel.elf",
@@ -103,7 +101,6 @@ class SqliteBuild(ZScript):
             "Makefile.nanvix",
             f"{_MAKE_VAR_HOME}={sysroot_p}",
             f"{_MAKE_VAR_TOOLCHAIN}={toolchain_p}",
-            f"{_MAKE_VAR_BUILDROOT}={translate(buildroot())}",
         ]
 
         args.extend(
