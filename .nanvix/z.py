@@ -23,6 +23,7 @@ from nanvix_zutil import (
     CFG_SYSROOT,
     EXIT_MISSING_DEP,
     TOOLCHAIN_CONTAINER_PATH,
+    DockerConfig,
     ZScript,
     log,
     make_initrd,
@@ -72,14 +73,14 @@ class SqliteBuild(ZScript):
 
     def _make_args(
         self,
+        docker: DockerConfig | None,
         *targets: str,
         with_install_prefix: bool = True,
     ) -> list[str]:
         """Build the common make argument list.
 
         Path translation for ``NANVIX_HOME`` is applied when running
-        under Docker (i.e. ``self.docker`` is set); otherwise the raw
-        host path is used.
+        under Docker; otherwise the raw host path is used.
         """
         sysroot = self.config.get(CFG_SYSROOT, "")
         if not sysroot:
@@ -90,13 +91,11 @@ class SqliteBuild(ZScript):
             )
         toolchain_p = TOOLCHAIN_CONTAINER_PATH
         sysroot_p = (
-            translate_path(self.docker.mounts, Path(sysroot))
-            if self.docker
-            else Path(sysroot)
+            translate_path(docker.mounts, Path(sysroot)) if docker else Path(sysroot)
         )
 
         def translate(p: Path):
-            return translate_path(self.docker.mounts, p) if self.docker else p
+            return translate_path(docker.mounts, p) if docker else p
 
         args = [
             "make",
@@ -128,7 +127,7 @@ class SqliteBuild(ZScript):
         args.extend(targets)
         return args
 
-    def build(self) -> None:
+    def build(self, docker: DockerConfig) -> None:
         """Cross-compile libsqlite3.a and sqlite3.elf for Nanvix.
 
         Linux: the host has a native ``cc``, so host-side tools (jimsh0,
@@ -144,10 +143,10 @@ class SqliteBuild(ZScript):
         copied back to the host.
         """
         if IS_WINDOWS:
-            self._build_windows()
+            self._build_windows(docker)
         else:
-            self._prebuild_host_tools()
-            run(*self._make_args("all"), cwd=repo_root(), docker=self.docker)
+            self._prebuild_host_tools(docker)
+            run(*self._make_args(docker, "all"), cwd=repo_root(), docker=docker)
         # Stage into test_out() for the windows-test upload glob.
         test_out().mkdir(parents=True, exist_ok=True)
         shutil.copy2(repo_root() / "sqlite3.elf", test_out() / "sqlite3.elf")
@@ -178,31 +177,24 @@ class SqliteBuild(ZScript):
             str((regular_out() / "bin" / "sqlite3.elf").relative_to(root)),
         ]
 
-    def _build_windows(self) -> None:
+    def _build_windows(self, docker: DockerConfig) -> None:
         """Run the full build pipeline inside a single Docker invocation.
 
         The SDK's native ``cc`` builds host generators, while SDK Clang builds
         the Nanvix target artifacts.
         """
-        if self.docker is None:
-            log.fatal(
-                "Docker mode is not active.",
-                code=EXIT_MISSING_DEP,
-                hint="Run `./z setup --with-docker IMAGE` first.",
-            )
-
         # Add output_files so build_windows_run_cmd copies artifacts back
         # to the mounted workspace after the container exits.  Includes
         # both legacy repo-root paths and install-staged paths under
         # .nanvix/out/ for `./z release`.
         docker_cfg = dataclasses.replace(
-            self.docker,
+            docker,
             output_files=list(self._WINDOWS_OUTPUT_FILES) + self._staged_output_files(),
         )
 
         jimsh0_cflags = " ".join(shlex.quote(f) for f in self._JIMSH0_CFLAGS)
-        configure_cmd = shlex.join(self._make_args("configure"))
-        all_cmd = shlex.join(self._make_args("all"))
+        configure_cmd = shlex.join(self._make_args(docker, "configure"))
+        all_cmd = shlex.join(self._make_args(docker, "all"))
 
         # One shell preserves generated files across the Windows tar-copy
         # build while host generators and target artifacts are compiled.
@@ -230,7 +222,7 @@ class SqliteBuild(ZScript):
         "-DHAVE_SYS_TIME_H",
     ]
 
-    def _prebuild_host_tools(self) -> None:
+    def _prebuild_host_tools(self, docker: DockerConfig) -> None:
         """Build host-side tools needed by autosetup and the Makefile.
 
         The SDK's native compiler builds jimsh0 and SQLite's generators.
@@ -249,12 +241,12 @@ class SqliteBuild(ZScript):
                 *self._JIMSH0_CFLAGS,
                 "autosetup/jimsh0.c",
                 cwd=root,
-                docker=self.docker,
+                docker=docker,
             )
 
         # Phase 2: run configure inside Docker.
         log.info("Running configure inside Docker...")
-        run(*self._make_args("configure"), cwd=root, docker=self.docker)
+        run(*self._make_args(docker, "configure"), cwd=root, docker=docker)
 
         # Phase 3: build remaining host tools for the build host.
         host_tools = [
@@ -274,7 +266,7 @@ class SqliteBuild(ZScript):
                 "B.tclsh=./jimsh0",
                 "TOP=.",
                 cwd=root,
-                docker=self.docker,
+                docker=docker,
             )
 
     def test(self) -> None:
