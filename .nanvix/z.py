@@ -27,6 +27,7 @@ from nanvix_zutil import (
     log,
     make_initrd,
     run,
+    translate_path,
 )
 from nanvix_zutil.paths import (
     dev_out,
@@ -89,11 +90,13 @@ class SqliteBuild(ZScript):
             )
         toolchain_p = TOOLCHAIN_CONTAINER_PATH
         sysroot_p = (
-            self.docker.translate_path(Path(sysroot)) if self.docker else Path(sysroot)
+            translate_path(self.docker.mounts, Path(sysroot))
+            if self.docker
+            else Path(sysroot)
         )
 
         def translate(p: Path):
-            return self.docker.translate_path(p) if self.docker else p
+            return translate_path(self.docker.mounts, p) if self.docker else p
 
         args = [
             "make",
